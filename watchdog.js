@@ -71,35 +71,46 @@ const checkServers = async function() {
       continue;
     }
 
-    console.log(`Checking ${server}`);
+//    console.log(`Checking ${server}`);
 
     try {
       const result = await needle(`http://${server}.fritz.box:31038/health`);
 
-      console.log(`Got ${server}`, result);
+//      console.log(`Got ${server}`, result.body);
+
+      if(result.body !== 'ok') {
+//        console.error(`Server unhealthy ${server}: ${result.body}`);
+
+        errors.push(`Server unhealthy ${server}: ${result.body}`);
+      }
     } catch(err) {
-      console.error(`Server down ${server}: ${err.message}`);
+//      console.error(`Server down ${server}: ${err.message}`);
 
       errors.push(`Server down ${server}: ${err.message}`);
     }
   }
 
   if(errors.length) {
-    const transport = nodemailer.createTransport({
-      host:   'postfix',
-      port:   25,
-      secure: false,
-      tls:    {rejectUnauthorized: false},
-    });
+    try {
+      const transport = nodemailer.createTransport({
+        host:   'postfix',
+        port:   25,
+        secure: false,
+        tls:    {rejectUnauthorized: false},
+      });
 
-    await transport.sendMail({
-      to:      'stefan@heine7.de',
-      subject: `Watchdog warning ${hostname}`,
-      html:    `
-        <p>Watchdog on ${hostname} detected remote server issues:</p>
-        <p><pre>${errors.join('\n')}</pre></p>
-      `,
-    });
+      await transport.sendMail({
+        to:      'stefan@heine7.de',
+        subject: `Watchdog warning ${hostname}`,
+        html:    `
+          <p>Watchdog on ${hostname} detected remote server issues:</p>
+          <p><pre>${errors.join('\n')}</pre></p>
+        `,
+      });
+    } catch(err) {
+      // eslint-disable-next-line no-console
+      console.error(`Failed to send error mail: ${err.message}`);
+    }
   }
 };
 
