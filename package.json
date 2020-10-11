@@ -1,0 +1,25 @@
+{
+  "name": "watchdog",
+  "version": "1.0.0",
+  "description": "",
+  "main": "watchdog.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "dayjs": "^1.9.1",
+    "express": "^4.17.1",
+    "lodash": "^4.17.20",
+    "millisecond": "^0.1.2",
+    "needle": "^2.5.2",
+    "nodemailer": "^6.4.13"
+  },
+  "devDependencies": {
+    "eslint": "^7.11.0",
+    "eslint-config-es": "^3.24.2",
+    "eslint-plugin-json": "^2.1.2",
+    "eslint-plugin-mocha": "^8.0.0"
+  }
+}
