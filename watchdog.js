@@ -7,50 +7,33 @@ const os          = require('os');
 const dayjs       = require('dayjs');
 const express     = require('express');
 const millisecond = require('millisecond');
+const mqtt        = require('async-mqtt');
 const needle      = require('needle');
 const nodemailer  = require('nodemailer');
+
+const logger      = require('./logger');
 
 const hostname = os.hostname();
 const servers  = [
   'pi-jalousie',
-  'qnap',
-  'pi-strom',
   'pi-wecker',
+  'qnap',
 ];
 
 // ###########################################################################
-// Logging
+// Globals
 
-/* eslint-disable no-console */
-const logger = {
-  info(msg, params) {
-    if(params) {
-      console.log(`${dayjs().format('YYYY-MM-DD HH:mm:ss')} INFO`, msg, params);
-    } else {
-      console.log(`${dayjs().format('YYYY-MM-DD HH:mm:ss')} INFO`, msg);
-    }
-  },
-  warn(msg, params) {
-    if(params) {
-      console.log(`${dayjs().format('YYYY-MM-DD HH:mm:ss')} WARN`, msg, params);
-    } else {
-      console.log(`${dayjs().format('YYYY-MM-DD HH:mm:ss')} WARN`, msg);
-    }
-  },
-  error(msg, params) {
-    if(params) {
-      console.log(`${dayjs().format('YYYY-MM-DD HH:mm:ss')} ERROR`, msg, params);
-    } else {
-      console.log(`${dayjs().format('YYYY-MM-DD HH:mm:ss')} ERROR`, msg);
-    }
-  },
-};
-/* eslint-enable no-console */
+let mqttClient;
 
 // ###########################################################################
 // Process handling
 
 const stopProcess = async function() {
+  if(mqttClient) {
+    await mqttClient.end();
+    mqttClient = undefined;
+  }
+
   logger.info(`Shutdown -------------------------------------------------`);
 
   process.exit(0);
@@ -66,25 +49,25 @@ const checkServers = async function() {
 
   for(const server of servers) {
     if(hostname === `${server}-watchdog`) {
-      // console.log(`Skipping ${server}`);
+      // logger.info(`Skipping ${server}`);
 
       continue;
     }
 
-//    console.log(`Checking ${server}`);
+//    logger.info(`Checking ${server}`);
 
     try {
       const result = await needle(`http://${server}.fritz.box:31038/health`);
 
-//      console.log(`Got ${server}`, result.body);
+//      logger.info(`Got ${server}`, result.body);
 
       if(result.body !== 'ok') {
-//        console.error(`Server unhealthy ${server}: ${result.body}`);
+//        logger.error(`Server unhealthy ${server}: ${result.body}`);
 
         errors.push(`Server unhealthy ${server}: ${result.body}`);
       }
     } catch(err) {
-//      console.error(`Server down ${server}: ${err.message}`);
+//      logger.error(`Server down ${server}: ${err.message}`);
 
       errors.push(`Server down ${server}: ${err.message}`);
     }
@@ -108,8 +91,7 @@ const checkServers = async function() {
         `,
       });
     } catch(err) {
-      // eslint-disable-next-line no-console
-      console.error(`Failed to send error mail: ${err.message}`);
+      logger.error(`Failed to send error mail: ${err.message}`);
     }
   }
 };
@@ -121,7 +103,7 @@ const checkServers = async function() {
   // #########################################################################
   // Startup
 
-  logger.info(`Startup --------------------------------------------------`);
+  logger.info(`Startup watchdog on ${hostname} ------------------------------------`);
 
   // #########################################################################
   // Start server
@@ -134,7 +116,7 @@ const checkServers = async function() {
 
   app.listen(31038);
 
-  logger.info(`Listening ------------------------------------------------`);
+  logger.info('Listening');
 
   // #########################################################################
   // Start monitor loop
@@ -142,4 +124,106 @@ const checkServers = async function() {
   await checkServers();
 
   setInterval(checkServers, millisecond('15 minutes'));
+
+  // #########################################################################
+  // Start MQTT monitoring
+  if(hostname === 'qnap-watchdog') {
+    const notified = {};
+    const timeout = {};
+
+    logger.info(`Start MQTT monitoring`);
+
+    mqttClient = await mqtt.connectAsync('tcp://192.168.6.7:1883');
+
+    mqttClient.on('message', async(topic, messageBuffer) => {
+      const messageRaw = messageBuffer.toString();
+
+      try {
+        let message;
+
+        try {
+          message = JSON.parse(messageRaw);
+        } catch(err) {
+          // ignore
+        }
+
+        const matches = topic.match(/^tasmota\/([^/]+)\/tele\/LWT$/);
+
+        if(matches) {
+          const sender = matches[1];
+
+          if(sender === 'steckdose') {
+            return;
+          }
+
+          if(messageRaw === 'Offline') {
+            if(timeout[sender]) {
+              // logger.warn(`${messageRaw} ${sender} timer already running`);
+            } else {
+              // logger.info(`${messageRaw} ${sender} timer start`);
+              timeout[sender] = setTimeout(async() => {
+                logger.info(`${messageRaw} ${sender} timer trigger notification`);
+
+                try {
+                  const transport = nodemailer.createTransport({
+                    host:   'postfix',
+                    port:   25,
+                    secure: false,
+                    tls:    {rejectUnauthorized: false},
+                  });
+
+                  await transport.sendMail({
+                    to:      'stefan@heine7.de',
+                    subject: 'Watchdog MQTT device down',
+                    html:    `
+                      <p>Watchdog on ${hostname} detected MQTT device down:</p>
+                      <p><pre>${sender} ${messageRaw}</pre></p>
+                    `,
+                  });
+
+                  notified[sender] = true;
+                } catch(err) {
+                  logger.error(`Failed to send error mail: ${err.message}`);
+                }
+              }, millisecond('20 minutes'));
+            }
+          } else {
+            if(timeout[sender]) {
+              // logger.info(`${messageRaw} ${sender} clear timer`);
+              clearTimeout(timeout[sender]);
+              Reflect.deleteProperty(timeout, sender);
+            }
+
+            if(notified[sender]) {
+              try {
+                const transport = nodemailer.createTransport({
+                  host:   'postfix',
+                  port:   25,
+                  secure: false,
+                  tls:    {rejectUnauthorized: false},
+                });
+
+                await transport.sendMail({
+                  to:      'stefan@heine7.de',
+                  subject: 'Watchdog MQTT device back up',
+                  html:    `
+                    <p>Watchdog on ${hostname} detected MQTT device back up:</p>
+                    <p><pre>${sender} ${messageRaw}</pre></p>
+                  `,
+                });
+
+                Reflect.deleteProperty(notified, sender);
+              } catch(err) {
+                logger.error(`Failed to send error mail: ${err.message}`);
+              }
+            }
+          }
+        }
+      } catch(err) {
+        logger.error(`Failed mqtt handling for '${topic}': ${messageRaw}`, err);
+      }
+    });
+
+    await mqttClient.subscribe('tasmota/#');
+  }
 })();
