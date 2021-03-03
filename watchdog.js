@@ -25,7 +25,10 @@ const servers  = [
 // ###########################################################################
 // Globals
 
-let mqttClient;
+let   mqttClient;
+const notified = {};
+const timeout = {};
+
 
 // ###########################################################################
 // Process handling
@@ -47,9 +50,6 @@ process.on('SIGTERM', () => stopProcess());
 // #############################################################################
 // Monitor remote servers
 const checkServers = async function() {
-  const notified = {};
-  const timeout = {};
-
   for(const server of servers) {
     if(hostname === `${server}-watchdog`) {
       // logger.info(`Skipping ${server}`);
@@ -81,9 +81,9 @@ const checkServers = async function() {
       if(timeout[server]) {
         // logger.warn(`${server} timer already running`);
       } else {
-        logger.info(`${server} timer start ${error}`);
+        logger.info(`${server} timer start: ${error}`);
         timeout[server] = setTimeout(async() => {
-          logger.info(`${server} timer trigger notification ${error}`);
+          logger.info(`${server} timer trigger notification: ${error}`);
 
           try {
             const transport = nodemailer.createTransport({
@@ -174,9 +174,6 @@ const checkServers = async function() {
   // #########################################################################
   // Start MQTT monitoring
   if(hostname === 'qnap-watchdog') {
-    const notified = {};
-    const timeout = {};
-
     logger.info(`Start MQTT monitoring`);
 
     mqttClient = await mqtt.connectAsync('tcp://192.168.6.7:1883');
@@ -204,11 +201,11 @@ const checkServers = async function() {
 
         if(messageRaw === 'Offline') {
           if(timeout[sender]) {
-            // logger.warn(`${messageRaw} ${sender} timer already running`);
+            // logger.warn(`${sender} timer already running: ${messageRaw}`);
           } else {
-            logger.info(`${messageRaw} ${sender} timer start`);
+            logger.info(`${sender} timer start: ${messageRaw}`);
             timeout[sender] = setTimeout(async() => {
-              logger.info(`${messageRaw} ${sender} timer trigger notification`);
+              logger.info(`${sender} timer trigger notification: ${messageRaw}`);
 
               try {
                 const transport = nodemailer.createTransport({
@@ -235,7 +232,7 @@ const checkServers = async function() {
           }
         } else {
           if(timeout[sender]) {
-            logger.info(`${messageRaw} ${sender} clear timer`);
+            logger.info(`${sender} clear timer: ${messageRaw}`);
             clearTimeout(timeout[sender]);
             Reflect.deleteProperty(timeout, sender);
           }
