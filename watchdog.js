@@ -2,6 +2,7 @@
 
 'use strict';
 
+/* eslint-disable camelcase */
 /* eslint-disable no-cond-assign */
 /* eslint-disable prefer-named-capture-group */
 
@@ -62,19 +63,23 @@ const checkServers = async function() {
     let error;
 
     try {
-      const result = await needle(`http://${server}.fritz.box:31038/health`);
+      const result = await needle('get', `http://${server}.fritz.box:31038/health`, {
+        open_timeout:     millisecond('5 seconds'),
+        response_timeout: millisecond('5 seconds'),
+        read_timeout:     millisecond('5 seconds'),
+      });
 
 //      logger.info(`Got ${server}`, result.body);
 
       if(result.body !== 'ok') {
         error = result.body;
 
-//        logger.error(`Server unhealthy ${server}: ${error}`);
+        logger.error(`Server unhealthy ${server}: ${error}`);
       }
     } catch(err) {
-      error = err.message;
+      error = `Server unresponsive ${server}: ${err.message}`;
 
-//      logger.error(`Server down ${server}: ${error}`);
+      logger.error(`Server down ${server}: ${error}`);
     }
 
     if(error) {
@@ -95,7 +100,7 @@ const checkServers = async function() {
 
             await transport.sendMail({
               to:      'stefan@heine7.de',
-              subject: `Watchdog warning ${hostname}`,
+              subject: `Watchdog server warning ${server} (${hostname})`,
               html:    `
                 <p>Watchdog on ${hostname} detected remote server issues:</p>
                 <p><pre>${error}</pre></p>
@@ -126,9 +131,9 @@ const checkServers = async function() {
 
           await transport.sendMail({
             to:      'stefan@heine7.de',
-            subject: 'Watchdog MQTT device back up',
+            subject: `Watchdog server back up ${server} (${hostname})`,
             html:    `
-              <p>Watchdog on ${hostname} detected MQTT device back up:</p>
+              <p>Watchdog on ${hostname} back up:</p>
               <p><pre>${server}</pre></p>
             `,
           });
@@ -184,60 +189,35 @@ const checkServers = async function() {
       try {
         // logger.info(topic, messageRaw);
 
-        let matches;
-        let sender;
-
-        if(matches = topic.match(/^tasmota\/([^/]+)\/tele\/LWT$/)) {
-          sender = matches[1];
-
-          if(sender === 'steckdose') {
+        if(topic.startsWith('Zigbee/')) {
+          if(topic.startsWith('Zigbee/bridge')) {
             return;
           }
-        } else if(topic === 'vito/tele/LWT') {
-          sender = 'vito';
-        } else {
-          throw new Error('Sender not detected');
-        }
 
-        if(messageRaw === 'Offline') {
-          if(timeout[sender]) {
-            // logger.warn(`${sender} timer already running: ${messageRaw}`);
-          } else {
-            logger.info(`${sender} timer start: ${messageRaw}`);
-            timeout[sender] = setTimeout(async() => {
-              logger.info(`${sender} timer trigger notification: ${messageRaw}`);
+          const sender = topic.replace(/^Zigbee\//, '');
+          let   message;
 
-              try {
-                const transport = nodemailer.createTransport({
-                  host:   'postfix',
-                  port:   25,
-                  secure: false,
-                  tls:    {rejectUnauthorized: false},
-                });
+          try {
+            message = JSON.parse(messageRaw);
 
-                await transport.sendMail({
-                  to:      'stefan@heine7.de',
-                  subject: 'Watchdog MQTT device down',
-                  html:    `
-                    <p>Watchdog on ${hostname} detected MQTT device down:</p>
-                    <p><pre>${sender} ${messageRaw}</pre></p>
-                  `,
-                });
+            const {batter} = message;
 
-                notified[sender] = true;
-              } catch(err) {
-                logger.error(`Failed to send error mail: ${err.message}`);
-              }
-            }, millisecond('20 minutes'));
+            if(battery < 50) {
+              logger.warn(`${sender} battery=${batter}`);
+            }
+          } catch(err) {
+            // ignore
           }
-        } else {
+
+          // logger.info(topic, messageRaw);
+
           if(timeout[sender]) {
-            logger.info(`${sender} clear timer: ${messageRaw}`);
             clearTimeout(timeout[sender]);
-            Reflect.deleteProperty(timeout, sender);
           }
 
-          if(notified[sender]) {
+          timeout[sender] = setTimeout(async() => {
+            logger.info(`${sender} timer trigger notification`);
+
             try {
               const transport = nodemailer.createTransport({
                 host:   'postfix',
@@ -248,16 +228,92 @@ const checkServers = async function() {
 
               await transport.sendMail({
                 to:      'stefan@heine7.de',
-                subject: 'Watchdog MQTT device back up',
+                subject: `Watchdog Zigbee device inactive ${sender} (${hostname})`,
                 html:    `
-                  <p>Watchdog on ${hostname} detected MQTT device back up:</p>
-                  <p><pre>${sender} ${messageRaw}</pre></p>
+                  <p>Watchdog on ${hostname} detected Zigbee device inactive:</p>
+                  <p><pre>${sender}</pre></p>
                 `,
               });
-
-              Reflect.deleteProperty(notified, sender);
             } catch(err) {
               logger.error(`Failed to send error mail: ${err.message}`);
+            }
+          }, millisecond('6 hours'));
+        } else {
+          let matches;
+          let sender;
+
+          if(matches = topic.match(/^tasmota\/([^/]+)\/tele\/LWT$/)) {
+            sender = matches[1];
+
+            if(sender === 'steckdose') {
+              return;
+            }
+          } else if(topic === 'vito/tele/LWT') {
+            sender = 'vito';
+          } else {
+            throw new Error('Sender not detected');
+          }
+
+          if(messageRaw === 'Offline') {
+            if(timeout[sender]) {
+              // logger.warn(`${sender} timer already running: ${messageRaw}`);
+            } else {
+              logger.info(`${sender} timer start: ${messageRaw}`);
+              timeout[sender] = setTimeout(async() => {
+                logger.info(`${sender} timer trigger notification: ${messageRaw}`);
+
+                try {
+                  const transport = nodemailer.createTransport({
+                    host:   'postfix',
+                    port:   25,
+                    secure: false,
+                    tls:    {rejectUnauthorized: false},
+                  });
+
+                  await transport.sendMail({
+                    to:      'stefan@heine7.de',
+                    subject: `Watchdog MQTT device down ${sender} (${hostname})`,
+                    html:    `
+                      <p>Watchdog on ${hostname} detected MQTT device down:</p>
+                      <p><pre>${sender} ${messageRaw}</pre></p>
+                    `,
+                  });
+
+                  notified[sender] = true;
+                } catch(err) {
+                  logger.error(`Failed to send error mail: ${err.message}`);
+                }
+              }, millisecond('20 minutes'));
+            }
+          } else {
+            if(timeout[sender]) {
+              logger.info(`${sender} clear timer: ${messageRaw}`);
+              clearTimeout(timeout[sender]);
+              Reflect.deleteProperty(timeout, sender);
+            }
+
+            if(notified[sender]) {
+              try {
+                const transport = nodemailer.createTransport({
+                  host:   'postfix',
+                  port:   25,
+                  secure: false,
+                  tls:    {rejectUnauthorized: false},
+                });
+
+                await transport.sendMail({
+                  to:      'stefan@heine7.de',
+                  subject: `Watchdog MQTT device back up ${sender} (${hostname})`,
+                  html:    `
+                    <p>Watchdog on ${hostname} detected MQTT device back up:</p>
+                    <p><pre>${sender} ${messageRaw}</pre></p>
+                  `,
+                });
+
+                Reflect.deleteProperty(notified, sender);
+              } catch(err) {
+                logger.error(`Failed to send error mail: ${err.message}`);
+              }
             }
           }
         }
@@ -268,5 +324,6 @@ const checkServers = async function() {
 
     await mqttClient.subscribe('tasmota/+/tele/LWT');
     await mqttClient.subscribe('vito/tele/LWT');
+    await mqttClient.subscribe('Zigbee/#');
   }
 })();
