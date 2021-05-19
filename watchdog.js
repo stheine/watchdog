@@ -200,12 +200,12 @@ const checkServers = async function() {
           try {
             message = JSON.parse(messageRaw);
 
-            const {batter} = message;
+            const {battery} = message;
 
             if(battery < 50) {
-              logger.warn(`${sender} battery=${batter}`);
+              logger.warn(`${sender} battery=${battery}`);
             }
-          } catch(err) {
+          } catch {
             // ignore
           }
 
@@ -234,10 +234,36 @@ const checkServers = async function() {
                   <p><pre>${sender}</pre></p>
                 `,
               });
+
+              notified[sender] = true;
             } catch(err) {
               logger.error(`Failed to send error mail: ${err.message}`);
             }
-          }, millisecond('6 hours'));
+          }, millisecond('15 hours'));
+
+          if(notified[sender]) {
+            try {
+              const transport = nodemailer.createTransport({
+                host:   'postfix',
+                port:   25,
+                secure: false,
+                tls:    {rejectUnauthorized: false},
+              });
+
+              await transport.sendMail({
+                to:      'stefan@heine7.de',
+                subject: `Watchdog Zigbee device back up ${sender} (${hostname})`,
+                html:    `
+                  <p>Watchdog on ${hostname} detected Zigbee device back up:</p>
+                  <p><pre>${sender}</pre></p>
+                `,
+              });
+
+              Reflect.deleteProperty(notified, sender);
+            } catch(err) {
+              logger.error(`Failed to send error mail: ${err.message}`);
+            }
+          }
         } else {
           let matches;
           let sender;

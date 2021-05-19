@@ -73,6 +73,7 @@
     'space-before-function-paren': [2, 'never'],
     'unicorn/catch-error-name': 0,
     'unicorn/explicit-length-check': 0,
-    'unicorn/no-zero-fractions': 0
+    'unicorn/no-zero-fractions': 0,
+    'unicorn/numeric-separators-style': 0
   }
 }
