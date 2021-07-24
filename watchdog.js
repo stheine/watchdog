@@ -27,6 +27,7 @@ const servers  = [
 // Globals
 
 let   mqttClient;
+let   lastStromTotalIn = 0;
 const notified = {};
 const timeout = {};
 
@@ -185,6 +186,14 @@ const checkServers = async function() {
 
     mqttClient.on('message', async(topic, messageBuffer) => {
       const messageRaw = messageBuffer.toString();
+      let   message;
+
+      try {
+        message = JSON.parse(messageRaw);
+      } catch {
+        // ignore
+        message = {};
+      }
 
       try {
         // logger.info(topic, messageRaw);
@@ -195,18 +204,10 @@ const checkServers = async function() {
           }
 
           const sender = topic.replace(/^Zigbee\//, '');
-          let   message;
+          const {battery} = message;
 
-          try {
-            message = JSON.parse(messageRaw);
-
-            const {battery} = message;
-
-            if(battery < 50) {
-              logger.warn(`${sender} battery=${battery}`);
-            }
-          } catch {
-            // ignore
+          if(battery < 50) {
+            logger.warn(`${sender} battery=${battery}`);
           }
 
           // logger.info(topic, messageRaw);
@@ -263,6 +264,80 @@ const checkServers = async function() {
             } catch(err) {
               logger.error(`Failed to send error mail: ${err.message}`);
             }
+          }
+        } else if(topic === 'tasmota/espstrom/tele/SENSOR') {
+          const sender = 'espstrom';
+          const {Total_in: stromTotalIn} = message.SML;
+
+          if(lastStromTotalIn === stromTotalIn) {
+            if(timeout[sender]) {
+              logger.warn(`${sender} timer already running`, message);
+            } else {
+              logger.info(`${sender} timer start`, message);
+              timeout[sender] = setTimeout(async() => {
+                logger.info(`${sender} timer trigger notification`, message);
+
+                try {
+                  const transport = nodemailer.createTransport({
+                    host:   'postfix',
+                    port:   25,
+                    secure: false,
+                    tls:    {rejectUnauthorized: false},
+                  });
+
+                  await transport.sendMail({
+                    to:      'stefan@heine7.de',
+                    subject: `Watchdog MQTT device down ${sender} (${hostname})`,
+                    html:    `
+                      <p>Watchdog on ${hostname} detected MQTT device down:</p>
+                      <p><pre>${sender} ${messageRaw}</pre></p>
+                    `,
+                  });
+
+                  notified[sender] = true;
+                } catch(err) {
+                  logger.error(`Failed to send error mail: ${err.message}`);
+                }
+              }, millisecond('5 minutes'));
+            }
+          } else {
+            if(timeout[sender]) {
+              logger.info(`${sender} clear timer`, message);
+              clearTimeout(timeout[sender]);
+              Reflect.deleteProperty(timeout, sender);
+            }
+
+            if(notified[sender]) {
+              try {
+                const transport = nodemailer.createTransport({
+                  host:   'postfix',
+                  port:   25,
+                  secure: false,
+                  tls:    {rejectUnauthorized: false},
+                });
+
+                await transport.sendMail({
+                  to:      'stefan@heine7.de',
+                  subject: `Watchdog MQTT device back up ${sender} (${hostname})`,
+                  html:    `
+                    <p>Watchdog on ${hostname} detected MQTT device back up:</p>
+                    <p><pre>${sender} ${messageRaw}</pre></p>
+                  `,
+                });
+
+                Reflect.deleteProperty(notified, sender);
+              } catch(err) {
+                logger.error(`Failed to send error mail: ${err.message}`);
+              }
+            }
+
+            lastStromTotalIn = stromTotalIn;
+
+            await mqttClient.publish(`tasmota/espstrom/cmnd/LedPower1`, '1');
+            setTimeout(async() => {
+              await mqttClient.publish(`tasmota/espstrom/cmnd/LedPower1`, '0');
+            }, millisecond('0.1 seconds'));
+
           }
         } else {
           let matches;
@@ -349,6 +424,7 @@ const checkServers = async function() {
     });
 
     await mqttClient.subscribe('tasmota/+/tele/LWT');
+    await mqttClient.subscribe('tasmota/espstrom/tele/SENSOR');
     await mqttClient.subscribe('vito/tele/LWT');
     await mqttClient.subscribe('Zigbee/#');
   }
