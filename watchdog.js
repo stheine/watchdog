@@ -27,9 +27,9 @@ const servers  = [
 // Globals
 
 let   mqttClient;
-let   lastStromTotalIn = 0;
+let   lastStrom;
 const notified = {};
-const timeout = {};
+const timeout  = {};
 
 
 // ###########################################################################
@@ -266,10 +266,10 @@ const checkServers = async function() {
             }
           }
         } else if(topic === 'tasmota/espstrom/tele/SENSOR') {
-          const sender = 'espstrom';
-          const {Total_in: stromTotalIn} = message.SML;
+          const sender       = 'espstrom';
+          const currentStrom = `${message.SML.Total_in}:${message.SML.Power_curr}`;
 
-          if(lastStromTotalIn === stromTotalIn) {
+          if(lastStrom === currentStrom) {
             if(timeout[sender]) {
               logger.warn(`${sender} timer already running`, message);
             } else {
@@ -331,7 +331,7 @@ const checkServers = async function() {
               }
             }
 
-            lastStromTotalIn = stromTotalIn;
+            lastStrom = currentStrom;
 
             await mqttClient.publish(`tasmota/espstrom/cmnd/LedPower1`, '1');
             setTimeout(async() => {
