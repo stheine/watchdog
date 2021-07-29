@@ -28,6 +28,7 @@ const servers  = [
 
 let   mqttClient;
 let   lastStrom;
+let   stromTriggerCounter = 0;
 const notified = {};
 const timeout  = {};
 
@@ -206,7 +207,7 @@ const checkServers = async function() {
           const sender = topic.replace(/^Zigbee\//, '');
           const {battery} = message;
 
-          if(battery < 50) {
+          if(battery < 35) {
             logger.warn(`${sender} battery=${battery}`);
           }
 
@@ -270,37 +271,43 @@ const checkServers = async function() {
           const currentStrom = `${message.SML.Verbrauch}:${message.SML.Leistung}`;
 
           if(lastStrom === currentStrom) {
-            if(timeout[sender]) {
-              logger.warn(`${sender} timer already running`, message);
-            } else {
-              logger.info(`${sender} timer start`, message);
-              timeout[sender] = setTimeout(async() => {
-                logger.info(`${sender} timer trigger notification`, message);
+            stromTriggerCounter++;
 
-                try {
-                  const transport = nodemailer.createTransport({
-                    host:   'postfix',
-                    port:   25,
-                    secure: false,
-                    tls:    {rejectUnauthorized: false},
-                  });
+            if(stromTriggerCounter > 3) {
+              if(timeout[sender]) {
+                logger.warn(`${sender} timer already running`, message);
+              } else {
+                logger.info(`${sender} timer start`, message);
+                timeout[sender] = setTimeout(async() => {
+                  logger.info(`${sender} timer trigger notification`, message);
 
-                  await transport.sendMail({
-                    to:      'stefan@heine7.de',
-                    subject: `Watchdog MQTT device down ${sender} (${hostname})`,
-                    html:    `
-                      <p>Watchdog on ${hostname} detected MQTT device down:</p>
-                      <p><pre>${sender} ${messageRaw}</pre></p>
-                    `,
-                  });
+                  try {
+                    const transport = nodemailer.createTransport({
+                      host:   'postfix',
+                      port:   25,
+                      secure: false,
+                      tls:    {rejectUnauthorized: false},
+                    });
 
-                  notified[sender] = true;
-                } catch(err) {
-                  logger.error(`Failed to send error mail: ${err.message}`);
-                }
-              }, millisecond('5 minutes'));
+                    await transport.sendMail({
+                      to:      'stefan@heine7.de',
+                      subject: `Watchdog MQTT device down ${sender} (${hostname})`,
+                      html:    `
+                        <p>Watchdog on ${hostname} detected MQTT device down:</p>
+                        <p><pre>${sender} ${messageRaw}</pre></p>
+                      `,
+                    });
+
+                    notified[sender] = true;
+                  } catch(err) {
+                    logger.error(`Failed to send error mail: ${err.message}`);
+                  }
+                }, millisecond('5 minutes'));
+              }
             }
           } else {
+            stromTriggerCounter = 0;
+
             if(timeout[sender]) {
               logger.info(`${sender} clear timer`, message);
               clearTimeout(timeout[sender]);
