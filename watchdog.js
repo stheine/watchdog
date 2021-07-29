@@ -267,7 +267,7 @@ const checkServers = async function() {
           }
         } else if(topic === 'tasmota/espstrom/tele/SENSOR') {
           const sender       = 'espstrom';
-          const currentStrom = `${message.SML.Total_in}:${message.SML.Power_curr}`;
+          const currentStrom = `${message.SML.Verbrauch}:${message.SML.Leistung}`;
 
           if(lastStrom === currentStrom) {
             if(timeout[sender]) {
