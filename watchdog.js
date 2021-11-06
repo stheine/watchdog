@@ -15,6 +15,7 @@ const needle      = require('needle');
 const nodemailer  = require('nodemailer');
 
 const logger      = require('./logger');
+const {sendMail}  = require('./mail');
 
 const hostname = os.hostname();
 const servers  = [
@@ -93,15 +94,8 @@ const checkServers = async function() {
           logger.info(`${server} timer trigger notification: ${error}`);
 
           try {
-            const transport = nodemailer.createTransport({
-              host:   'postfix',
-              port:   25,
-              secure: false,
-              tls:    {rejectUnauthorized: false},
-            });
-
-            await transport.sendMail({
-              to:      'stefan@heine7.de',
+            await sendMail({
+              to:      'technik@heine7.de',
               subject: `Watchdog server warning ${server} (${hostname})`,
               html:    `
                 <p>Watchdog on ${hostname} detected remote server issues:</p>
@@ -124,15 +118,8 @@ const checkServers = async function() {
 
       if(notified[server]) {
         try {
-          const transport = nodemailer.createTransport({
-            host:   'postfix',
-            port:   25,
-            secure: false,
-            tls:    {rejectUnauthorized: false},
-          });
-
-          await transport.sendMail({
-            to:      'stefan@heine7.de',
+          await sendMail({
+            to:      'technik@heine7.de',
             subject: `Watchdog server back up ${server} (${hostname})`,
             html:    `
               <p>Watchdog on ${hostname} back up:</p>
@@ -200,14 +187,27 @@ const checkServers = async function() {
         // logger.info(topic, messageRaw);
 
         if(topic.startsWith('Zigbee/')) {
-          if(topic.startsWith('Zigbee/bridge')) {
+          if(topic === 'Zigbee/bridge/event' && message.type === 'device_joined') {
+            await sendMail({
+              to:      'technik@heine7.de',
+              subject: `MQTT device joined '${message.data.friendly_name}'`,
+              html:    `
+                <p>MQTT device joined</p>
+                ${message.data.friendly_name}
+                <br />
+                ${message.data.ieee_address}
+              `,
+            });
+
+            return;
+          } else if(topic.startsWith('Zigbee/bridge')) {
             return;
           }
 
           const sender = topic.replace(/^Zigbee\//, '');
           const {battery} = message;
 
-          if(battery < 35) {
+          if(battery < 30) {
             logger.warn(`${sender} battery=${battery}`);
           }
 
@@ -221,15 +221,8 @@ const checkServers = async function() {
             logger.info(`${sender} timer trigger notification`);
 
             try {
-              const transport = nodemailer.createTransport({
-                host:   'postfix',
-                port:   25,
-                secure: false,
-                tls:    {rejectUnauthorized: false},
-              });
-
-              await transport.sendMail({
-                to:      'stefan@heine7.de',
+              await sendMail({
+                to:      'technik@heine7.de',
                 subject: `Watchdog Zigbee device inactive ${sender} (${hostname})`,
                 html:    `
                   <p>Watchdog on ${hostname} detected Zigbee device inactive:</p>
@@ -245,15 +238,8 @@ const checkServers = async function() {
 
           if(notified[sender]) {
             try {
-              const transport = nodemailer.createTransport({
-                host:   'postfix',
-                port:   25,
-                secure: false,
-                tls:    {rejectUnauthorized: false},
-              });
-
-              await transport.sendMail({
-                to:      'stefan@heine7.de',
+              await sendMail({
+                to:      'technik@heine7.de',
                 subject: `Watchdog Zigbee device back up ${sender} (${hostname})`,
                 html:    `
                   <p>Watchdog on ${hostname} detected Zigbee device back up:</p>
@@ -268,7 +254,7 @@ const checkServers = async function() {
           }
         } else if(topic === 'tasmota/espstrom/tele/SENSOR') {
           const sender       = 'espstrom';
-          const currentStrom = `${message.SML.Verbrauch}:${message.SML.Leistung}`;
+          const currentStrom = `${message.SML.Verbrauch}:${message.SML.Einspeisung}:${message.SML.Leistung}`;
 
           if(lastStrom === currentStrom) {
             stromTriggerCounter++;
@@ -282,15 +268,8 @@ const checkServers = async function() {
                   logger.info(`${sender} timer trigger notification`, message);
 
                   try {
-                    const transport = nodemailer.createTransport({
-                      host:   'postfix',
-                      port:   25,
-                      secure: false,
-                      tls:    {rejectUnauthorized: false},
-                    });
-
-                    await transport.sendMail({
-                      to:      'stefan@heine7.de',
+                    await sendMail({
+                      to:      'technik@heine7.de',
                       subject: `Watchdog MQTT device down ${sender} (${hostname})`,
                       html:    `
                         <p>Watchdog on ${hostname} detected MQTT device down:</p>
@@ -316,15 +295,8 @@ const checkServers = async function() {
 
             if(notified[sender]) {
               try {
-                const transport = nodemailer.createTransport({
-                  host:   'postfix',
-                  port:   25,
-                  secure: false,
-                  tls:    {rejectUnauthorized: false},
-                });
-
-                await transport.sendMail({
-                  to:      'stefan@heine7.de',
+                await sendMail({
+                  to:      'technik@heine7.de',
                   subject: `Watchdog MQTT device back up ${sender} (${hostname})`,
                   html:    `
                     <p>Watchdog on ${hostname} detected MQTT device back up:</p>
@@ -339,12 +311,6 @@ const checkServers = async function() {
             }
 
             lastStrom = currentStrom;
-
-            await mqttClient.publish(`tasmota/espstrom/cmnd/LedPower1`, '1');
-            setTimeout(async() => {
-              await mqttClient.publish(`tasmota/espstrom/cmnd/LedPower1`, '0');
-            }, millisecond('0.1 seconds'));
-
           }
         } else {
           let matches;
@@ -371,15 +337,8 @@ const checkServers = async function() {
                 logger.info(`${sender} timer trigger notification: ${messageRaw}`);
 
                 try {
-                  const transport = nodemailer.createTransport({
-                    host:   'postfix',
-                    port:   25,
-                    secure: false,
-                    tls:    {rejectUnauthorized: false},
-                  });
-
-                  await transport.sendMail({
-                    to:      'stefan@heine7.de',
+                  await sendMail({
+                    to:      'technik@heine7.de',
                     subject: `Watchdog MQTT device down ${sender} (${hostname})`,
                     html:    `
                       <p>Watchdog on ${hostname} detected MQTT device down:</p>
@@ -402,15 +361,8 @@ const checkServers = async function() {
 
             if(notified[sender]) {
               try {
-                const transport = nodemailer.createTransport({
-                  host:   'postfix',
-                  port:   25,
-                  secure: false,
-                  tls:    {rejectUnauthorized: false},
-                });
-
-                await transport.sendMail({
-                  to:      'stefan@heine7.de',
+                await sendMail({
+                  to:      'technik@heine7.de',
                   subject: `Watchdog MQTT device back up ${sender} (${hostname})`,
                   html:    `
                     <p>Watchdog on ${hostname} detected MQTT device back up:</p>
