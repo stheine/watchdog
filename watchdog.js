@@ -12,7 +12,6 @@ const express     = require('express');
 const millisecond = require('millisecond');
 const mqtt        = require('async-mqtt');
 const needle      = require('needle');
-const nodemailer  = require('nodemailer');
 
 const logger      = require('./logger');
 const {sendMail}  = require('./mail');
@@ -186,121 +185,66 @@ const checkServers = async function() {
       try {
         // logger.info(topic, messageRaw);
 
-        if(topic.startsWith('Zigbee/')) {
-          if(topic === 'Zigbee/bridge/event' && message.type === 'device_joined') {
-            await sendMail({
-              to:      'technik@heine7.de',
-              subject: `MQTT device joined '${message.data.friendly_name}'`,
-              html:    `
-                <p>MQTT device joined</p>
-                ${message.data.friendly_name}
-                <br />
-                ${message.data.ieee_address}
-              `,
-            });
-
-            return;
-          } else if(topic.startsWith('Zigbee/bridge')) {
-            return;
-          }
-
-          const sender = topic.replace(/^Zigbee\//, '');
-          const {battery} = message;
-
-          if(battery < 30) {
-            logger.warn(`${sender} battery=${battery}`);
-          }
-
-          // logger.info(topic, messageRaw);
-
-          if(timeout[sender]) {
-            clearTimeout(timeout[sender]);
-          }
-
-          timeout[sender] = setTimeout(async() => {
-            logger.info(`${sender} timer trigger notification`);
-
-            try {
+        switch(true) {
+          case topic.startsWith('Zigbee/'): {
+            if(topic === 'Zigbee/bridge/event' && message.type === 'device_joined') {
               await sendMail({
                 to:      'technik@heine7.de',
-                subject: `Watchdog Zigbee device inactive ${sender} (${hostname})`,
+                subject: `MQTT device joined '${message.data.friendly_name}'`,
                 html:    `
-                  <p>Watchdog on ${hostname} detected Zigbee device inactive:</p>
-                  <p><pre>${sender}</pre></p>
+                  <p>MQTT device joined</p>
+                  ${message.data.friendly_name}
+                  <br />
+                  ${message.data.ieee_address}
                 `,
               });
 
-              notified[sender] = true;
-            } catch(err) {
-              logger.error(`Failed to send error mail: ${err.message}`);
+              return;
             }
-          }, millisecond('15 hours'));
-
-          if(notified[sender]) {
-            try {
-              await sendMail({
-                to:      'technik@heine7.de',
-                subject: `Watchdog Zigbee device back up ${sender} (${hostname})`,
-                html:    `
-                  <p>Watchdog on ${hostname} detected Zigbee device back up:</p>
-                  <p><pre>${sender}</pre></p>
-                `,
-              });
-
-              Reflect.deleteProperty(notified, sender);
-            } catch(err) {
-              logger.error(`Failed to send error mail: ${err.message}`);
+            if(topic.startsWith('Zigbee/bridge')) {
+              return;
             }
-          }
-        } else if(topic === 'tasmota/espstrom/tele/SENSOR') {
-          const sender       = 'espstrom';
-          const currentStrom = `${message.SML.Verbrauch}:${message.SML.Einspeisung}:${message.SML.Leistung}`;
 
-          if(lastStrom === currentStrom) {
-            stromTriggerCounter++;
+            const sender = topic.replace(/^Zigbee\//, '');
+            const {battery} = message;
 
-            if(stromTriggerCounter > 3) {
-              if(timeout[sender]) {
-                logger.warn(`${sender} timer already running`, message);
-              } else {
-                logger.info(`${sender} timer start`, message);
-                timeout[sender] = setTimeout(async() => {
-                  logger.info(`${sender} timer trigger notification`, message);
-
-                  try {
-                    await sendMail({
-                      to:      'technik@heine7.de',
-                      subject: `Watchdog MQTT device down ${sender} (${hostname})`,
-                      html:    `
-                        <p>Watchdog on ${hostname} detected MQTT device down:</p>
-                        <p><pre>${sender} ${messageRaw}</pre></p>
-                      `,
-                    });
-
-                    notified[sender] = true;
-                  } catch(err) {
-                    logger.error(`Failed to send error mail: ${err.message}`);
-                  }
-                }, millisecond('5 minutes'));
-              }
+            if(battery < 30) {
+              logger.warn(`${sender} battery=${battery}`);
             }
-          } else {
-            stromTriggerCounter = 0;
+
+            // logger.info(topic, messageRaw);
 
             if(timeout[sender]) {
-              logger.info(`${sender} clear timer`, message);
               clearTimeout(timeout[sender]);
-              Reflect.deleteProperty(timeout, sender);
             }
+
+            timeout[sender] = setTimeout(async() => {
+              logger.info(`${sender} timer trigger notification`);
+
+              try {
+                await sendMail({
+                  to:      'technik@heine7.de',
+                  subject: `Watchdog Zigbee device inactive ${sender} (${hostname})`,
+                  html:    `
+                    <p>Watchdog on ${hostname} detected Zigbee device inactive:</p>
+                    <p><pre>${sender}</pre></p>
+                  `,
+                });
+
+                notified[sender] = true;
+              } catch(err) {
+                logger.error(`Failed to send error mail: ${err.message}`);
+              }
+            }, millisecond('15 hours'));
 
             if(notified[sender]) {
               try {
                 await sendMail({
                   to:      'technik@heine7.de',
-                  subject: `Watchdog MQTT device back up ${sender} (${hostname})`,
+                  subject: `Watchdog Zigbee device back up ${sender} (${hostname})`,
                   html:    `
-                    <p>Watchdog on ${hostname} detected MQTT device back up:</p>
-                    <p><pre>${sender} ${messageRaw}</pre></p>
+                    <p>Watchdog on ${hostname} detected Zigbee device back up:</p>
+                    <p><pre>${sender}</pre></p>
                   `,
                 });
 
@@ -309,73 +253,158 @@ const checkServers = async function() {
                 logger.error(`Failed to send error mail: ${err.message}`);
               }
             }
-
-            lastStrom = currentStrom;
-          }
-        } else {
-          let matches;
-          let sender;
-
-          if(matches = topic.match(/^tasmota\/([^/]+)\/tele\/LWT$/)) {
-            sender = matches[1];
-
-            if(sender === 'steckdose') {
-              return;
-            }
-          } else if(topic === 'vito/tele/LWT') {
-            sender = 'vito';
-          } else {
-            throw new Error('Sender not detected');
+            break;
           }
 
-          if(messageRaw === 'Offline') {
-            if(timeout[sender]) {
-              // logger.warn(`${sender} timer already running: ${messageRaw}`);
+          case topic === 'tasmota/espstrom/tele/SENSOR': {
+            const sender       = 'espstrom';
+            const currentStrom = `${message.SML.Verbrauch}:${message.SML.Einspeisung}:${message.SML.Leistung}`;
+
+            if(lastStrom === currentStrom) {
+              stromTriggerCounter++;
+
+              if(stromTriggerCounter > 3) {
+                if(timeout[sender]) {
+                  logger.warn(`${sender} timer already running`, message);
+                } else {
+                  logger.info(`${sender} timer start`, message);
+                  timeout[sender] = setTimeout(async() => {
+                    logger.info(`${sender} timer trigger notification`, message);
+
+                    try {
+                      await sendMail({
+                        to:      'technik@heine7.de',
+                        subject: `Watchdog MQTT device down ${sender} (${hostname})`,
+                        html:    `
+                          <p>Watchdog on ${hostname} detected MQTT device down:</p>
+                          <p><pre>${sender} ${messageRaw}</pre></p>
+                        `,
+                      });
+
+                      notified[sender] = true;
+                    } catch(err) {
+                      logger.error(`Failed to send error mail: ${err.message}`);
+                    }
+                  }, millisecond('5 minutes'));
+                }
+              }
             } else {
-              logger.info(`${sender} timer start: ${messageRaw}`);
-              timeout[sender] = setTimeout(async() => {
-                logger.info(`${sender} timer trigger notification: ${messageRaw}`);
+              stromTriggerCounter = 0;
 
+              if(timeout[sender]) {
+                logger.info(`${sender} clear timer`, message);
+                clearTimeout(timeout[sender]);
+                Reflect.deleteProperty(timeout, sender);
+              }
+
+              if(notified[sender]) {
                 try {
                   await sendMail({
                     to:      'technik@heine7.de',
-                    subject: `Watchdog MQTT device down ${sender} (${hostname})`,
+                    subject: `Watchdog MQTT device back up ${sender} (${hostname})`,
                     html:    `
-                      <p>Watchdog on ${hostname} detected MQTT device down:</p>
+                      <p>Watchdog on ${hostname} detected MQTT device back up:</p>
                       <p><pre>${sender} ${messageRaw}</pre></p>
                     `,
                   });
 
-                  notified[sender] = true;
+                  Reflect.deleteProperty(notified, sender);
                 } catch(err) {
                   logger.error(`Failed to send error mail: ${err.message}`);
                 }
-              }, millisecond('20 minutes'));
-            }
-          } else {
-            if(timeout[sender]) {
-              logger.info(`${sender} clear timer: ${messageRaw}`);
-              clearTimeout(timeout[sender]);
-              Reflect.deleteProperty(timeout, sender);
-            }
-
-            if(notified[sender]) {
-              try {
-                await sendMail({
-                  to:      'technik@heine7.de',
-                  subject: `Watchdog MQTT device back up ${sender} (${hostname})`,
-                  html:    `
-                    <p>Watchdog on ${hostname} detected MQTT device back up:</p>
-                    <p><pre>${sender} ${messageRaw}</pre></p>
-                  `,
-                });
-
-                Reflect.deleteProperty(notified, sender);
-              } catch(err) {
-                logger.error(`Failed to send error mail: ${err.message}`);
               }
+
+              lastStrom = currentStrom;
             }
+            break;
           }
+
+          case topic.endsWith('/tele/LWT'): {
+            let matches;
+            let sender;
+
+            if(matches = topic.match(/^tasmota\/([^/]+)\/tele\/LWT$/)) {
+              sender = matches[1];
+
+              if(sender === 'steckdose') {
+                return;
+              }
+            } else if(topic === 'vito/tele/LWT') {
+              sender = 'vito';
+            } else {
+              throw new Error('Sender not detected');
+            }
+
+            switch(messageRaw) {
+              case 'Offline':
+                if(timeout[sender]) {
+                  // logger.warn(`${sender} timer already running: ${messageRaw}`);
+                } else {
+                  timeout[`${sender}-log`] = setTimeout(async() => {
+                    // Delay the logging, as there is often an Offline/Online within a few seconds.
+                    logger.info(`${sender} timer start: ${messageRaw}`);
+                  }, millisecond('2 seconds'));
+                  timeout[sender] = setTimeout(async() => {
+                    logger.info(`${sender} timer trigger notification: ${messageRaw}`);
+
+                    try {
+                      await sendMail({
+                        to:      'technik@heine7.de',
+                        subject: `Watchdog MQTT device down ${sender} (${hostname})`,
+                        html:    `
+                          <p>Watchdog on ${hostname} detected MQTT device down:</p>
+                          <p><pre>${sender} ${messageRaw}</pre></p>
+                        `,
+                      });
+
+                      notified[sender] = true;
+                    } catch(err) {
+                      logger.error(`Failed to send error mail: ${err.message}`);
+                    }
+                  }, millisecond('20 minutes'));
+                }
+                break;
+
+              case 'Online':
+                if(timeout[sender]) {
+                  if(timeout[`${sender}-log`]) {
+                    clearTimeout(timeout[`${sender}-log`]);
+                    Reflect.deleteProperty(timeout, `${sender}-log`);
+                  } else {
+                    logger.info(`${sender} clear timer: ${messageRaw}`);
+                  }
+                  clearTimeout(timeout[sender]);
+                  Reflect.deleteProperty(timeout, sender);
+                }
+
+                if(notified[sender]) {
+                  try {
+                    await sendMail({
+                      to:      'technik@heine7.de',
+                      subject: `Watchdog MQTT device back up ${sender} (${hostname})`,
+                      html:    `
+                        <p>Watchdog on ${hostname} detected MQTT device back up:</p>
+                        <p><pre>${sender} ${messageRaw}</pre></p>
+                      `,
+                    });
+
+                    Reflect.deleteProperty(notified, sender);
+                  } catch(err) {
+                    logger.error(`Failed to send error mail: ${err.message}`);
+                  }
+                }
+                break;
+
+              default:
+                logger.warn(`Unhandled LWT status '${messageRaw}' in '${topic}'`);
+                break;
+            }
+            break;
+          }
+
+          default:
+            logger.warn(`Unhandled topic '${topic}'`);
+            break;
         }
       } catch(err) {
         logger.error(`Failed mqtt handling for '${topic}': ${messageRaw}`, err);
