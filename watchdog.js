@@ -1,20 +1,18 @@
 #!/usr/bin/env node
 
-'use strict';
-
 /* eslint-disable camelcase */
 /* eslint-disable no-cond-assign */
 /* eslint-disable prefer-named-capture-group */
 
-const os          = require('os');
+import os          from 'os';
 
-const express     = require('express');
-const millisecond = require('millisecond');
-const mqtt        = require('async-mqtt');
-const needle      = require('needle');
+import express     from 'express';
+import millisecond from 'millisecond';
+import mqtt        from 'async-mqtt';
+import needle      from 'needle';
 
-const logger      = require('./logger');
-const {sendMail}  = require('./mail');
+import logger      from './logger.js';
+import {sendMail}  from './mail.js';
 
 const hostname = os.hostname();
 const servers  = [

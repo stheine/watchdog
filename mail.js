@@ -1,8 +1,6 @@
-'use strict';
+import nodemailer from 'nodemailer';
 
-const nodemailer = require('nodemailer');
-
-const sendMail = async function({to, subject, html}) {
+export const sendMail = async function({to, subject, html}) {
   const transport = nodemailer.createTransport({
     host:   'localhost',
     port:   25,
@@ -11,8 +9,4 @@ const sendMail = async function({to, subject, html}) {
   });
 
   await transport.sendMail({from: 'technik@heine7.de.', to, subject, html});
-};
-
-module.exports = {
-  sendMail,
 };

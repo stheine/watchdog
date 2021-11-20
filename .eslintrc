@@ -1,39 +1,11 @@
 {
   extends: 'es/node',
 
-//  ecmaFeatures: {
-//    jsx: true
-//  },
-
-//  plugins: [
-//    'react'
-//  ],
+  'parserOptions': {
+    'sourceType': 'module'
+  },
 
   rules : {
-//    'linebreak-style': 0,
-
-//    'no-spaced-func': 2,
-
-//    'object-shorthand': 0,
-//    'operator-linebreak': 0,
-
-//    'space-after-keywords': 0,
-
-//    'no-restricted-syntax': [0, 'ClassDeclaration'],
-//    'max-params': 0,
-//    'no-process-exit': 0,
-//    'prefer-template': 0,
-//
-//    'keyword-spacing': ['error', {overrides: {
-//      catch: {after: false},
-//      if: {after: false},
-//      for: {after: false},
-//      switch: {after: false},
-//      while: {after: false}
-//    }}],
-//
-//    'complexity': 0,
-
     'array-bracket-spacing': [2, 'never'],
     'capitalized-comments': 0,
     'comma-dangle': [2, 'always-multiline'],
@@ -70,6 +42,7 @@
     'object-curly-spacing': [2, 'never'],
     'prefer-destructuring': 0,
     'require-unicode-regexp': 0,
+    'sort-imports': 0,
     'space-before-function-paren': [2, 'never'],
     'unicorn/catch-error-name': 0,
     'unicorn/explicit-length-check': 0,
