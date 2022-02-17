@@ -206,7 +206,7 @@ const checkServers = async function() {
             const sender = topic.replace(/^Zigbee\//, '');
             const {battery} = message;
 
-            if(battery < 30) {
+            if(battery < 15) {
               logger.warn(`${sender} battery=${battery}`);
             }
 
@@ -274,7 +274,7 @@ const checkServers = async function() {
                         to:      'technik@heine7.de',
                         subject: `Watchdog MQTT device down ${sender} (${hostname})`,
                         html:    `
-                          <p>Watchdog on ${hostname} detected MQTT device down:</p>
+                          <p>Watchdog on ${hostname} detected MQTT device down, or Smart Meter not configured:</p>
                           <p><pre>${sender} ${messageRaw}</pre></p>
                         `,
                       });
@@ -324,7 +324,8 @@ const checkServers = async function() {
             if(matches = topic.match(/^tasmota\/([^/]+)\/tele\/LWT$/)) {
               sender = matches[1];
 
-              if(sender === 'steckdose') {
+              if(['steckdose', 'druckerkamera'].includes(sender)) {
+                // Ignore alive-stats for these devices
                 return;
               }
             } else if(topic === 'vito/tele/LWT') {
