@@ -1,15 +1,14 @@
 #!/usr/bin/env node
 
-/* eslint-disable camelcase */
 /* eslint-disable no-cond-assign */
 /* eslint-disable prefer-named-capture-group */
 
 import os          from 'os';
 
+import axios       from 'axios';
 import express     from 'express';
-import millisecond from 'millisecond';
 import mqtt        from 'async-mqtt';
-import needle      from 'needle';
+import ms          from 'ms';
 
 import logger      from './logger.js';
 import {sendMail}  from './mail.js';
@@ -63,16 +62,14 @@ const checkServers = async function() {
     let error;
 
     try {
-      const result = await needle('get', `http://${server}.fritz.box:31038/health`, {
-        open_timeout:     millisecond('5 seconds'),
-        response_timeout: millisecond('5 seconds'),
-        read_timeout:     millisecond('5 seconds'),
+      const response = await axios.get(`http://${server}.fritz.box:31038/health`, {
+        timeout: ms('5 seconds'),
       });
 
-//      logger.info(`Got ${server}`, result.body);
+//      logger.info(`Got ${server}`, response.data);
 
-      if(result.body !== 'ok') {
-        error = result.body;
+      if(response.data !== 'ok') {
+        error = response.data;
 
         logger.error(`Server unhealthy ${server}: ${error}`);
       }
@@ -104,7 +101,7 @@ const checkServers = async function() {
           } catch(err) {
             logger.error(`Failed to send error mail: ${err.message}`);
           }
-        }, millisecond('20 minutes'));
+        }, ms('20 minutes'));
       }
     } else {
       if(timeout[server]) {
@@ -160,7 +157,7 @@ const checkServers = async function() {
 
   await checkServers();
 
-  setInterval(checkServers, millisecond('1 minutes'));
+  setInterval(checkServers, ms('1 minutes'));
 
   // #########################################################################
   // Start MQTT monitoring
@@ -206,7 +203,8 @@ const checkServers = async function() {
             const sender = topic.replace(/^Zigbee\//, '');
             const {battery} = message;
 
-            if(battery < 15) {
+            // LuftSensor Büro battery=14, then dead
+            if(battery < 16) {
               logger.warn(`${sender} battery=${battery}`);
             }
 
@@ -233,7 +231,7 @@ const checkServers = async function() {
               } catch(err) {
                 logger.error(`Failed to send error mail: ${err.message}`);
               }
-            }, millisecond('15 hours'));
+            }, ms('15 hours'));
 
             if(notified[sender]) {
               try {
@@ -261,7 +259,7 @@ const checkServers = async function() {
             if(lastStrom === currentStrom) {
               stromTriggerCounter++;
 
-              if(stromTriggerCounter > 3) {
+              if(stromTriggerCounter > 12) { // 12 * 10s = 2 minutes, no update, trigger warning
                 if(timeout[sender]) {
                   logger.warn(`${sender} timer already running`, message);
                 } else {
@@ -283,7 +281,7 @@ const checkServers = async function() {
                     } catch(err) {
                       logger.error(`Failed to send error mail: ${err.message}`);
                     }
-                  }, millisecond('5 minutes'));
+                  }, ms('5 minutes'));
                 }
               }
             } else {
@@ -342,7 +340,7 @@ const checkServers = async function() {
                   timeout[`${sender}-log`] = setTimeout(async() => {
                     // Delay the logging, as there is often an Offline/Online within a few seconds.
                     logger.info(`${sender} timer start: ${messageRaw}`);
-                  }, millisecond('2 seconds'));
+                  }, ms('2 seconds'));
                   timeout[sender] = setTimeout(async() => {
                     logger.info(`${sender} timer trigger notification: ${messageRaw}`);
 
@@ -360,7 +358,7 @@ const checkServers = async function() {
                     } catch(err) {
                       logger.error(`Failed to send error mail: ${err.message}`);
                     }
-                  }, millisecond('20 minutes'));
+                  }, ms('20 minutes'));
                 }
                 break;
 
