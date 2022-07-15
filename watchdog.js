@@ -3,15 +3,16 @@
 /* eslint-disable no-cond-assign */
 /* eslint-disable prefer-named-capture-group */
 
-import os          from 'os';
+import {setTimeout as delay} from 'timers/promises';
+import os                    from 'os';
 
-import axios       from 'axios';
-import express     from 'express';
-import mqtt        from 'async-mqtt';
-import ms          from 'ms';
+import axios                 from 'axios';
+import express               from 'express';
+import mqtt                  from 'async-mqtt';
+import ms                    from 'ms';
 
-import logger      from './logger.js';
-import {sendMail}  from './mail.js';
+import logger                from './logger.js';
+import {sendMail}            from './mail.js';
 
 const hostname = os.hostname();
 const servers  = [
@@ -60,24 +61,38 @@ const checkServers = async function() {
 //    logger.info(`Checking ${server}`);
 
     let error;
+    let retry = 3;
 
-    try {
-      const response = await axios.get(`http://${server}.fritz.box:31038/health`, {
-        timeout: ms('5 seconds'),
-      });
+    do {
+      try {
+        const response = await axios.get(`http://${server}.fritz.box:31038/health`, {
+          timeout: ms('5 seconds'),
+        });
 
-//      logger.info(`Got ${server}`, response.data);
+//        logger.info(`Got ${server}`, response.data);
 
-      if(response.data !== 'ok') {
-        error = response.data;
+        retry = 0;
 
-        logger.error(`Server unhealthy ${server}: ${error}`);
+        if(response.data === 'ok') {
+          error = null;
+        } else {
+          error = response.data;
+
+          logger.error(`Server unhealthy ${server}: ${error}`);
+        }
+      } catch(err) {
+        error = `Server unresponsive ${server} (retry=${retry}): ${err.message}`;
+
+        if(retry) {
+          retry--;
+        }
+
+        if(retry) {
+          await delay(ms('5 seconds'));
+          logger.error(error);
+        }
       }
-    } catch(err) {
-      error = `Server unresponsive ${server}: ${err.message}`;
-
-      logger.error(`Server down ${server}: ${error}`);
-    }
+    } while(retry);
 
     if(error) {
       if(timeout[server]) {
@@ -197,6 +212,9 @@ const checkServers = async function() {
               return;
             }
             if(topic.startsWith('Zigbee/bridge')) {
+              return;
+            }
+            if(topic.endsWith('/availability')) {
               return;
             }
 
