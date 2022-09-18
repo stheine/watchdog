@@ -6,6 +6,7 @@
 import {setTimeout as delay} from 'timers/promises';
 import os                    from 'os';
 
+import _                     from 'lodash';
 import axios                 from 'axios';
 import express               from 'express';
 import mqtt                  from 'async-mqtt';
@@ -20,6 +21,12 @@ const servers  = [
   'pi-wecker',
   'qnap',
 ];
+const mqttTimerNames = [
+  'esp32-wasser/zaehlerstand/json',
+];
+const mqttTimers = {};
+const mqttTimersReported = [];
+const mqttTimerTimeout = ms('1 hour');
 
 // ###########################################################################
 // Globals
@@ -146,6 +153,23 @@ const checkServers = async function() {
 };
 
 // ###########################################################################
+// MQTT timers
+const reportMqttTimerExceeded = async function(mqttTimerName) {
+  if(!mqttTimersReported.includes(mqttTimerName)) {
+    await sendMail({
+      to:      'technik@heine7.de',
+      subject: `Missing MQTT message for ${mqttTimerName}`,
+      html:    `
+        <p>Missing MQTT message for ${mqttTimerName}</p>
+        <p>Watchdog on ${hostname} detected MQTT issue</p>
+      `,
+    });
+
+    mqttTimersReported.push(mqttTimerName);
+  }
+};
+
+// ###########################################################################
 // Main
 
 (async() => {
@@ -175,6 +199,12 @@ const checkServers = async function() {
   setInterval(checkServers, ms('1 minutes'));
 
   // #########################################################################
+  // Starts timers for MQTT expectations
+  for(const mqttTimerName of mqttTimerNames) {
+    mqttTimers[mqttTimerName] = setTimeout(() => reportMqttTimerExceeded(mqttTimerName), mqttTimerTimeout);
+  }
+
+  // #########################################################################
   // Start MQTT monitoring
   if(hostname === 'qnap-watchdog') {
     logger.info(`Start MQTT monitoring`);
@@ -190,6 +220,22 @@ const checkServers = async function() {
       } catch {
         // ignore
         message = {};
+      }
+
+      if(mqttTimerNames.includes(topic)) {
+        const mqttTimerName = topic;
+
+        if(mqttTimers[mqttTimerName]) {
+          clearTimeout(mqttTimers[mqttTimerName]);
+
+          Reflect.deleteProperty(mqttTimers, mqttTimerName);
+        }
+
+        if(mqttTimersReported.includes(mqttTimerName)) {
+          _.pull(mqttTimersReported, mqttTimerName);
+        }
+
+        mqttTimers[mqttTimerName] = setTimeout(() => reportMqttTimerExceeded(mqttTimerName), mqttTimerTimeout);
       }
 
       try {
@@ -266,6 +312,48 @@ const checkServers = async function() {
               } catch(err) {
                 logger.error(`Failed to send error mail: ${err.message}`);
               }
+            }
+            break;
+          }
+
+          case topic === 'esp32-wasser/zaehlerstand/json': {
+            if(message.error === 'no error') {
+              if(timeout[topic]) {
+                logger.info(`${topic} timer clear`, messageRaw);
+                clearTimeout(timeout[topic]);
+                Reflect.deleteProperty(timeout, topic);
+              }
+              if(notified[topic]) {
+                await sendMail({
+                  to:      'technik@heine7.de',
+                  subject: `MQTT recovered error from ${topic}`,
+                  html:    `
+                    <p>Watchdog on ${hostname} detected MQTT recovery</p>
+                    <p><pre>${topic} ${messageRaw}</pre></p>
+                  `,
+                });
+
+                notified[topic] = false;
+              }
+            } else if(!notified[topic] && !timeout[topic]) {
+              logger.info(`${topic} timer start`, messageRaw);
+              timeout[topic] = setTimeout(async() => {
+                try {
+                  await sendMail({
+                    to:      'technik@heine7.de',
+                    subject: `MQTT error received from ${topic}`,
+                    html:    `
+                      <p>Watchdog on ${hostname} detected MQTT error</p>
+                      <p><pre>${topic} ${messageRaw}</pre></p>
+                    `,
+                  });
+
+                  notified[topic] = true;
+                  Reflect.deleteProperty(timeout, topic);
+                } catch(err) {
+                  logger.error(`Failed to send error mail: ${err.message}`);
+                }
+              }, ms('4 hours'));
             }
             break;
           }
@@ -426,6 +514,7 @@ const checkServers = async function() {
       }
     });
 
+    await mqttClient.subscribe('esp32-wasser/zaehlerstand/json');
     await mqttClient.subscribe('tasmota/+/tele/LWT');
     await mqttClient.subscribe('tasmota/espstrom/tele/SENSOR');
     await mqttClient.subscribe('vito/tele/LWT');
