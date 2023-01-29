@@ -243,17 +243,41 @@ const reportMqttTimerExceeded = async function(mqttTimerName) {
 
         switch(true) {
           case topic.startsWith('Zigbee/'): {
-            if(topic === 'Zigbee/bridge/event' && message.type === 'device_joined') {
-              await sendMail({
-                to:      'technik@heine7.de',
-                subject: `MQTT device joined '${message.data.friendly_name}'`,
-                html:    `
-                  <p>MQTT device joined</p>
-                  ${message.data.friendly_name}
-                  <br />
-                  ${message.data.ieee_address}
-                `,
-              });
+//            if(topic === 'Zigbee/bridge/event' && message.type === 'device_joined') {
+            if(topic === 'Zigbee/bridge/event' && message.type === 'device_interview') {
+              switch(message.data?.status) {
+                case 'started':
+                  break;
+
+                case 'successful':
+                  await sendMail({
+                    to:      'technik@heine7.de',
+                    subject: `MQTT device joined '${message.data.friendly_name}'`,
+                    html:    `
+                      <p>MQTT device joined</p>
+                      ${message.data.friendly_name}
+                      <br />
+                      ${message.data.ieee_address}
+                    `,
+                  });
+                  break;
+
+                default:
+                  await sendMail({
+                    to:      'technik@heine7.de',
+                    subject: `MQTT device ??? '${message.data.friendly_name}'`,
+                    html:    `
+                      <p>MQTT device ???</p>
+                      ${message.data.friendly_name}
+                      <br />
+                      ${message.data.ieee_address}
+                      <pre>
+                        ${JSON.stringify(message, null, 2)}
+                      </pre>
+                    `,
+                  });
+                  break;
+              }
 
               return;
             }
@@ -295,7 +319,7 @@ const reportMqttTimerExceeded = async function(mqttTimerName) {
               } catch(err) {
                 logger.error(`Failed to send error mail: ${err.message}`);
               }
-            }, ms('15 hours'));
+            }, ms('12 hours'));
 
             if(notified[sender]) {
               try {
