@@ -243,7 +243,6 @@ const reportMqttTimerExceeded = async function(mqttTimerName) {
 
         switch(true) {
           case topic.startsWith('Zigbee/'): {
-//            if(topic === 'Zigbee/bridge/event' && message.type === 'device_joined') {
             if(topic === 'Zigbee/bridge/event' && message.type === 'device_interview') {
               switch(message.data?.status) {
                 case 'started':
@@ -302,24 +301,26 @@ const reportMqttTimerExceeded = async function(mqttTimerName) {
               clearTimeout(timeout[sender]);
             }
 
-            timeout[sender] = setTimeout(async() => {
-              logger.info(`${sender} timer trigger notification`);
+            if(!['Coordinator', 'FensterSensor Sonoff 1'].includes(sender)) {
+              timeout[sender] = setTimeout(async() => {
+                logger.info(`${sender} timer trigger notification`);
 
-              try {
-                await sendMail({
-                  to:      'technik@heine7.de',
-                  subject: `Watchdog Zigbee device inactive ${sender} (${hostname})`,
-                  html:    `
-                    <p>Watchdog on ${hostname} detected Zigbee device inactive:</p>
-                    <p><pre>${sender}</pre></p>
-                  `,
-                });
+                try {
+                  await sendMail({
+                    to:      'technik@heine7.de',
+                    subject: `Watchdog Zigbee device inactive ${sender} (${hostname})`,
+                    html:    `
+                      <p>Watchdog on ${hostname} detected Zigbee device inactive:</p>
+                      <p><pre>${sender}</pre></p>
+                    `,
+                  });
 
-                notified[sender] = true;
-              } catch(err) {
-                logger.error(`Failed to send error mail: ${err.message}`);
-              }
-            }, ms('12 hours'));
+                  notified[sender] = true;
+                } catch(err) {
+                  logger.error(`Failed to send error mail: ${err.message}`);
+                }
+              }, ms('12 hours'));
+            }
 
             if(notified[sender]) {
               try {
@@ -448,13 +449,24 @@ const reportMqttTimerExceeded = async function(mqttTimerName) {
           case topic.endsWith('/tele/LWT'): {
             let matches;
             let sender;
+            let lwtTimeout = ms('20 minutes');
 
             if(matches = topic.match(/^tasmota\/([^/]+)\/tele\/LWT$/)) {
               sender = matches[1];
 
-              if(['steckdose', 'druckerkamera'].includes(sender)) {
-                // Ignore alive-stats for these devices
-                return;
+              switch(sender) {
+                case 'druckerkamera':
+                case 'steckdose':
+                  // Ignore alive-stats for these devices
+                  return;
+
+                case 'thermometer':
+                  lwtTimeout = ms('6 hours');
+                  break;
+
+                default:
+                  // nothing
+                  break;
               }
             } else if(topic === 'vito/tele/LWT') {
               sender = 'vito';
@@ -467,10 +479,12 @@ const reportMqttTimerExceeded = async function(mqttTimerName) {
                 if(timeout[sender]) {
                   // logger.warn(`${sender} timer already running: ${messageRaw}`);
                 } else {
-                  timeout[`${sender}-log`] = setTimeout(async() => {
-                    // Delay the logging, as there is often an Offline/Online within a few seconds.
-                    logger.info(`${sender} timer start: ${messageRaw}`);
-                  }, ms('2 seconds'));
+                  if(sender !== 'thermometer') {
+                    timeout[`${sender}-log`] = setTimeout(async() => {
+                      // Delay the logging, as there is often an Offline/Online within a few seconds.
+                      logger.info(`${sender} 1 timer start: ${messageRaw}`);
+                    }, ms('2 seconds'));
+                  }
                   timeout[sender] = setTimeout(async() => {
                     logger.info(`${sender} timer trigger notification: ${messageRaw}`);
 
@@ -488,7 +502,7 @@ const reportMqttTimerExceeded = async function(mqttTimerName) {
                     } catch(err) {
                       logger.error(`Failed to send error mail: ${err.message}`);
                     }
-                  }, ms('20 minutes'));
+                  }, lwtTimeout);
                 }
                 break;
 
