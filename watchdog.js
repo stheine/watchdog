@@ -167,7 +167,7 @@ const checkServers = async function() {
   if(hostname === 'qnap-watchdog') {
     logger.info(`Start MQTT monitoring`);
 
-    mqttClient = await mqtt.connectAsync('tcp://192.168.6.7:1883');
+    mqttClient = await mqtt.connectAsync('tcp://192.168.6.5:1883');
 
     mqttClient.on('message', async(topic, messageBuffer) => {
       const messageRaw = messageBuffer.toString();
