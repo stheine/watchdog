@@ -8,5 +8,5 @@ export const sendMail = async function({to, subject, html}) {
     tls:    {rejectUnauthorized: false},
   });
 
-  await transport.sendMail({from: 'technik@heine7.de.', to, subject, html});
+  await transport.sendMail({from: 'technik@heine7.de', to, subject, html});
 };

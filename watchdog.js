@@ -1,18 +1,19 @@
 #!/usr/bin/env node
 
-/* eslint-disable camelcase */
 /* eslint-disable no-cond-assign */
 /* eslint-disable prefer-named-capture-group */
 
-import os          from 'os';
+import {setTimeout as delay} from 'timers/promises';
+import os                    from 'os';
 
-import express     from 'express';
-import millisecond from 'millisecond';
-import mqtt        from 'async-mqtt';
-import needle      from 'needle';
+import _                     from 'lodash';
+import axios                 from 'axios';
+import express               from 'express';
+import mqtt                  from 'async-mqtt';
+import ms                    from 'ms';
 
-import logger      from './logger.js';
-import {sendMail}  from './mail.js';
+import logger                from './logger.js';
+import {sendMail}            from './mail.js';
 
 const hostname = os.hostname();
 const servers  = [
@@ -20,6 +21,12 @@ const servers  = [
   'pi-wecker',
   'qnap',
 ];
+const mqttTimerNames = [
+  'esp32-wasser/zaehlerstand/json',
+];
+const mqttTimers = {};
+const mqttTimersReported = [];
+const mqttTimerTimeout = ms('1 hour');
 
 // ###########################################################################
 // Globals
@@ -61,26 +68,38 @@ const checkServers = async function() {
 //    logger.info(`Checking ${server}`);
 
     let error;
+    let retry = 3;
 
-    try {
-      const result = await needle('get', `http://${server}.fritz.box:31038/health`, {
-        open_timeout:     millisecond('5 seconds'),
-        response_timeout: millisecond('5 seconds'),
-        read_timeout:     millisecond('5 seconds'),
-      });
+    do {
+      try {
+        const response = await axios.get(`http://${server}.fritz.box:31038/health`, {
+          timeout: ms('5 seconds'),
+        });
 
-//      logger.info(`Got ${server}`, result.body);
+//        logger.info(`Got ${server}`, response.data);
 
-      if(result.body !== 'ok') {
-        error = result.body;
+        retry = 0;
 
-        logger.error(`Server unhealthy ${server}: ${error}`);
+        if(response.data === 'ok') {
+          error = null;
+        } else {
+          error = response.data;
+
+          logger.error(`Server unhealthy ${server}: ${error}`);
+        }
+      } catch(err) {
+        error = `Server unresponsive ${server} (retry=${retry}): ${err.message}`;
+
+        if(retry) {
+          retry--;
+        }
+
+        if(retry) {
+          await delay(ms('5 seconds'));
+          logger.error(error);
+        }
       }
-    } catch(err) {
-      error = `Server unresponsive ${server}: ${err.message}`;
-
-      logger.error(`Server down ${server}: ${error}`);
-    }
+    } while(retry);
 
     if(error) {
       if(timeout[server]) {
@@ -104,7 +123,7 @@ const checkServers = async function() {
           } catch(err) {
             logger.error(`Failed to send error mail: ${err.message}`);
           }
-        }, millisecond('20 minutes'));
+        }, ms('20 minutes'));
       }
     } else {
       if(timeout[server]) {
@@ -130,6 +149,23 @@ const checkServers = async function() {
         }
       }
     }
+  }
+};
+
+// ###########################################################################
+// MQTT timers
+const reportMqttTimerExceeded = async function(mqttTimerName) {
+  if(!mqttTimersReported.includes(mqttTimerName)) {
+    await sendMail({
+      to:      'technik@heine7.de',
+      subject: `Missing MQTT message for ${mqttTimerName}`,
+      html:    `
+        <p>Missing MQTT message for ${mqttTimerName}</p>
+        <p>Watchdog on ${hostname} detected MQTT issue</p>
+      `,
+    });
+
+    mqttTimersReported.push(mqttTimerName);
   }
 };
 
@@ -160,7 +196,13 @@ const checkServers = async function() {
 
   await checkServers();
 
-  setInterval(checkServers, millisecond('1 minutes'));
+  setInterval(checkServers, ms('1 minutes'));
+
+  // #########################################################################
+  // Starts timers for MQTT expectations
+  for(const mqttTimerName of mqttTimerNames) {
+    mqttTimers[mqttTimerName] = setTimeout(() => reportMqttTimerExceeded(mqttTimerName), mqttTimerTimeout);
+  }
 
   // #########################################################################
   // Start MQTT monitoring
@@ -180,33 +222,76 @@ const checkServers = async function() {
         message = {};
       }
 
+      if(mqttTimerNames.includes(topic)) {
+        const mqttTimerName = topic;
+
+        if(mqttTimers[mqttTimerName]) {
+          clearTimeout(mqttTimers[mqttTimerName]);
+
+          Reflect.deleteProperty(mqttTimers, mqttTimerName);
+        }
+
+        if(mqttTimersReported.includes(mqttTimerName)) {
+          _.pull(mqttTimersReported, mqttTimerName);
+        }
+
+        mqttTimers[mqttTimerName] = setTimeout(() => reportMqttTimerExceeded(mqttTimerName), mqttTimerTimeout);
+      }
+
       try {
         // logger.info(topic, messageRaw);
 
         switch(true) {
           case topic.startsWith('Zigbee/'): {
-            if(topic === 'Zigbee/bridge/event' && message.type === 'device_joined') {
-              await sendMail({
-                to:      'technik@heine7.de',
-                subject: `MQTT device joined '${message.data.friendly_name}'`,
-                html:    `
-                  <p>MQTT device joined</p>
-                  ${message.data.friendly_name}
-                  <br />
-                  ${message.data.ieee_address}
-                `,
-              });
+            if(topic === 'Zigbee/bridge/event' && message.type === 'device_interview') {
+              switch(message.data?.status) {
+                case 'started':
+                  break;
+
+                case 'successful':
+                  await sendMail({
+                    to:      'technik@heine7.de',
+                    subject: `MQTT device joined '${message.data.friendly_name}'`,
+                    html:    `
+                      <p>MQTT device joined</p>
+                      ${message.data.friendly_name}
+                      <br />
+                      ${message.data.ieee_address}
+                    `,
+                  });
+                  break;
+
+                default:
+                  await sendMail({
+                    to:      'technik@heine7.de',
+                    subject: `MQTT device ??? '${message.data.friendly_name}'`,
+                    html:    `
+                      <p>MQTT device ???</p>
+                      ${message.data.friendly_name}
+                      <br />
+                      ${message.data.ieee_address}
+                      <pre>
+                        ${JSON.stringify(message, null, 2)}
+                      </pre>
+                    `,
+                  });
+                  break;
+              }
 
               return;
             }
             if(topic.startsWith('Zigbee/bridge')) {
               return;
             }
+            if(topic.endsWith('/availability')) {
+              return;
+            }
 
             const sender = topic.replace(/^Zigbee\//, '');
             const {battery} = message;
 
-            if(battery < 15) {
+            // LuftSensor Büro battery=14, then dead
+            if(battery < 16) {
               logger.warn(`${sender} battery=${battery}`);
             }
 
@@ -216,24 +301,26 @@ const checkServers = async function() {
               clearTimeout(timeout[sender]);
             }
 
-            timeout[sender] = setTimeout(async() => {
-              logger.info(`${sender} timer trigger notification`);
+            if(!['Coordinator', 'FensterSensor Sonoff 1'].includes(sender)) {
+              timeout[sender] = setTimeout(async() => {
+                logger.info(`${sender} timer trigger notification`);
 
-              try {
-                await sendMail({
-                  to:      'technik@heine7.de',
-                  subject: `Watchdog Zigbee device inactive ${sender} (${hostname})`,
-                  html:    `
-                    <p>Watchdog on ${hostname} detected Zigbee device inactive:</p>
-                    <p><pre>${sender}</pre></p>
-                  `,
-                });
+                try {
+                  await sendMail({
+                    to:      'technik@heine7.de',
+                    subject: `Watchdog Zigbee device inactive ${sender} (${hostname})`,
+                    html:    `
+                      <p>Watchdog on ${hostname} detected Zigbee device inactive:</p>
+                      <p><pre>${sender}</pre></p>
+                    `,
+                  });
 
-                notified[sender] = true;
-              } catch(err) {
-                logger.error(`Failed to send error mail: ${err.message}`);
-              }
-            }, millisecond('15 hours'));
+                  notified[sender] = true;
+                } catch(err) {
+                  logger.error(`Failed to send error mail: ${err.message}`);
+                }
+              }, ms('12 hours'));
+            }
 
             if(notified[sender]) {
               try {
@@ -254,6 +341,48 @@ const checkServers = async function() {
             break;
           }
 
+          case topic === 'esp32-wasser/zaehlerstand/json': {
+            if(message.error === 'no error') {
+              if(timeout[topic]) {
+                logger.info(`${topic} timer clear`, messageRaw);
+                clearTimeout(timeout[topic]);
+                Reflect.deleteProperty(timeout, topic);
+              }
+              if(notified[topic]) {
+                await sendMail({
+                  to:      'technik@heine7.de',
+                  subject: `MQTT recovered error from ${topic}`,
+                  html:    `
+                    <p>Watchdog on ${hostname} detected MQTT recovery</p>
+                    <p><pre>${topic} ${messageRaw}</pre></p>
+                  `,
+                });
+
+                notified[topic] = false;
+              }
+            } else if(!notified[topic] && !timeout[topic]) {
+              logger.info(`${topic} timer start`, messageRaw);
+              timeout[topic] = setTimeout(async() => {
+                try {
+                  await sendMail({
+                    to:      'technik@heine7.de',
+                    subject: `MQTT error received from ${topic}`,
+                    html:    `
+                      <p>Watchdog on ${hostname} detected MQTT error</p>
+                      <p><pre>${topic} ${messageRaw}</pre></p>
+                    `,
+                  });
+
+                  notified[topic] = true;
+                  Reflect.deleteProperty(timeout, topic);
+                } catch(err) {
+                  logger.error(`Failed to send error mail: ${err.message}`);
+                }
+              }, ms('4 hours'));
+            }
+            break;
+          }
+
           case topic === 'tasmota/espstrom/tele/SENSOR': {
             const sender       = 'espstrom';
             const currentStrom = `${message.SML.Verbrauch}:${message.SML.Einspeisung}:${message.SML.Leistung}`;
@@ -261,7 +390,7 @@ const checkServers = async function() {
             if(lastStrom === currentStrom) {
               stromTriggerCounter++;
 
-              if(stromTriggerCounter > 3) {
+              if(stromTriggerCounter > 12) { // 12 * 10s = 2 minutes, no update, trigger warning
                 if(timeout[sender]) {
                   logger.warn(`${sender} timer already running`, message);
                 } else {
@@ -283,7 +412,7 @@ const checkServers = async function() {
                     } catch(err) {
                       logger.error(`Failed to send error mail: ${err.message}`);
                     }
-                  }, millisecond('5 minutes'));
+                  }, ms('5 minutes'));
                 }
               }
             } else {
@@ -320,13 +449,24 @@ const checkServers = async function() {
           case topic.endsWith('/tele/LWT'): {
             let matches;
             let sender;
+            let lwtTimeout = ms('20 minutes');
 
             if(matches = topic.match(/^tasmota\/([^/]+)\/tele\/LWT$/)) {
               sender = matches[1];
 
-              if(['steckdose', 'druckerkamera'].includes(sender)) {
-                // Ignore alive-stats for these devices
-                return;
+              switch(sender) {
+                case 'druckerkamera':
+                case 'steckdose':
+                  // Ignore alive-stats for these devices
+                  return;
+
+                case 'thermometer':
+                  lwtTimeout = ms('6 hours');
+                  break;
+
+                default:
+                  // nothing
+                  break;
               }
             } else if(topic === 'vito/tele/LWT') {
               sender = 'vito';
@@ -339,10 +479,12 @@ const checkServers = async function() {
                 if(timeout[sender]) {
                   // logger.warn(`${sender} timer already running: ${messageRaw}`);
                 } else {
-                  timeout[`${sender}-log`] = setTimeout(async() => {
-                    // Delay the logging, as there is often an Offline/Online within a few seconds.
-                    logger.info(`${sender} timer start: ${messageRaw}`);
-                  }, millisecond('2 seconds'));
+                  if(sender !== 'thermometer') {
+                    timeout[`${sender}-log`] = setTimeout(async() => {
+                      // Delay the logging, as there is often an Offline/Online within a few seconds.
+                      logger.info(`${sender} 1 timer start: ${messageRaw}`);
+                    }, ms('2 seconds'));
+                  }
                   timeout[sender] = setTimeout(async() => {
                     logger.info(`${sender} timer trigger notification: ${messageRaw}`);
 
@@ -360,7 +502,7 @@ const checkServers = async function() {
                     } catch(err) {
                       logger.error(`Failed to send error mail: ${err.message}`);
                     }
-                  }, millisecond('20 minutes'));
+                  }, lwtTimeout);
                 }
                 break;
 
@@ -410,6 +552,7 @@ const checkServers = async function() {
       }
     });
 
+    await mqttClient.subscribe('esp32-wasser/zaehlerstand/json');
     await mqttClient.subscribe('tasmota/+/tele/LWT');
     await mqttClient.subscribe('tasmota/espstrom/tele/SENSOR');
     await mqttClient.subscribe('vito/tele/LWT');
