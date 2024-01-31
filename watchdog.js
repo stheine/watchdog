@@ -21,6 +21,15 @@ const servers  = [
   'pi-wecker',
   'qnap',
 ];
+const ignoreDevices = [
+  'druckerkamera',
+  'infrarotheizung-schlafzimmer',
+  'steckdose',
+];
+const longTimeoutDevices = [
+  'infrarotheizung-buero',
+  'thermometer',
+];
 const mqttTimerNames = [
   'esp32-wasser/zaehlerstand/json',
 ];
@@ -34,9 +43,9 @@ const mqttTimerTimeout = ms('1 hour');
 let   mqttClient;
 let   lastStrom;
 let   stromTriggerCounter = 0;
+const logged   = {};
 const notified = {};
 const timeout  = {};
-
 
 // ###########################################################################
 // Process handling
@@ -82,6 +91,7 @@ const checkServers = async function() {
 
         if(response.data === 'ok') {
           error = null;
+          Reflect.deleteProperty(logged, `unresponsive:${server}`);
         } else {
           error = response.data;
 
@@ -96,7 +106,10 @@ const checkServers = async function() {
 
         if(retry) {
           await delay(ms('5 seconds'));
-          logger.error(error);
+          if(!logged[`unresponsive:${server}`]) {
+            logger.error(error);
+            logged[`unresponsive:${server}`] = true;
+          }
         }
       }
     } while(retry);
@@ -324,6 +337,8 @@ const reportMqttTimerExceeded = async function(mqttTimerName) {
 
             if(notified[sender]) {
               try {
+                Reflect.deleteProperty(notified, sender);
+
                 await sendMail({
                   to:      'technik@heine7.de',
                   subject: `Watchdog Zigbee device back up ${sender} (${hostname})`,
@@ -332,8 +347,6 @@ const reportMqttTimerExceeded = async function(mqttTimerName) {
                     <p><pre>${sender}</pre></p>
                   `,
                 });
-
-                Reflect.deleteProperty(notified, sender);
               } catch(err) {
                 logger.error(`Failed to send error mail: ${err.message}`);
               }
@@ -453,25 +466,17 @@ const reportMqttTimerExceeded = async function(mqttTimerName) {
 
             if(matches = topic.match(/^tasmota\/([^/]+)\/tele\/LWT$/)) {
               sender = matches[1];
-
-              switch(sender) {
-                case 'druckerkamera':
-                case 'steckdose':
-                  // Ignore alive-stats for these devices
-                  return;
-
-                case 'thermometer':
-                  lwtTimeout = ms('6 hours');
-                  break;
-
-                default:
-                  // nothing
-                  break;
-              }
             } else if(topic === 'vito/tele/LWT') {
               sender = 'vito';
             } else {
               throw new Error('Sender not detected');
+            }
+
+            if(ignoreDevices.includes(sender)) {
+              // Ignore alive-stats for these devices
+              return;
+            } else if(longTimeoutDevices.includes(sender)) {
+              lwtTimeout = ms('6 hours');
             }
 
             switch(messageRaw) {
@@ -482,8 +487,8 @@ const reportMqttTimerExceeded = async function(mqttTimerName) {
                   if(sender !== 'thermometer') {
                     timeout[`${sender}-log`] = setTimeout(async() => {
                       // Delay the logging, as there is often an Offline/Online within a few seconds.
-                      logger.info(`${sender} 1 timer start: ${messageRaw}`);
-                    }, ms('2 seconds'));
+                      logger.info(`${sender} timer start: ${messageRaw}`);
+                    }, ms('10 seconds')); // Tasmota restart typically is 4 seconds
                   }
                   timeout[sender] = setTimeout(async() => {
                     logger.info(`${sender} timer trigger notification: ${messageRaw}`);
@@ -511,7 +516,7 @@ const reportMqttTimerExceeded = async function(mqttTimerName) {
                   if(timeout[`${sender}-log`]) {
                     clearTimeout(timeout[`${sender}-log`]);
                     Reflect.deleteProperty(timeout, `${sender}-log`);
-                  } else {
+                  } else if(sender !== 'thermometer') {
                     logger.info(`${sender} clear timer: ${messageRaw}`);
                   }
                   clearTimeout(timeout[sender]);
