@@ -20,6 +20,7 @@ const servers  = [
   'pi-jalousie',
   'pi-wecker',
   'qnap',
+  'wyse',
 ];
 const ignoreDevices = [
   'druckerkamera',
@@ -219,7 +220,7 @@ const reportMqttTimerExceeded = async function(mqttTimerName) {
 
   // #########################################################################
   // Start MQTT monitoring
-  if(hostname === 'qnap-watchdog') {
+  if(hostname === 'wyse-watchdog') {
     logger.info(`Start MQTT monitoring`);
 
     mqttClient = await mqtt.connectAsync('tcp://192.168.6.7:1883');
