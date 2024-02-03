@@ -2,7 +2,7 @@ import nodemailer from 'nodemailer';
 
 export const sendMail = async function({to, subject, html}) {
   const transport = nodemailer.createTransport({
-    host:   'postfix',
+    host:   'wyse.fritz.box',
     port:   25,
     secure: false,
     tls:    {rejectUnauthorized: false},
