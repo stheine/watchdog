@@ -1,4 +1,8 @@
+import os         from 'node:os';
+
 import nodemailer from 'nodemailer';
+
+const hostname = os.hostname();
 
 export const sendMail = async function({to, subject, html}) {
   const transport = nodemailer.createTransport({
@@ -8,5 +12,5 @@ export const sendMail = async function({to, subject, html}) {
     tls:    {rejectUnauthorized: false},
   });
 
-  await transport.sendMail({from: 'technik@heine7.de', to, subject, html});
+  await transport.sendMail({from: `"${hostname}" technik@heine7.de`, to, subject, html});
 };
