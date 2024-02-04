@@ -16,6 +16,7 @@ import logger                from './logger.js';
 import {sendMail}            from './mail.js';
 
 const hostname = os.hostname();
+const mqttMonitoringHost = 'wyse-watchdog';
 const servers  = [
   'pi-jalousie',
   'pi-wecker',
@@ -213,14 +214,13 @@ const reportMqttTimerExceeded = async function(mqttTimerName) {
   setInterval(checkServers, ms('1 minutes'));
 
   // #########################################################################
-  // Starts timers for MQTT expectations
-  for(const mqttTimerName of mqttTimerNames) {
-    mqttTimers[mqttTimerName] = setTimeout(() => reportMqttTimerExceeded(mqttTimerName), mqttTimerTimeout);
-  }
-
-  // #########################################################################
   // Start MQTT monitoring
-  if(hostname === 'wyse-watchdog') {
+  if(hostname === mqttMonitoringHost) {
+    // Starts timers for MQTT expectations
+    for(const mqttTimerName of mqttTimerNames) {
+      mqttTimers[mqttTimerName] = setTimeout(() => reportMqttTimerExceeded(mqttTimerName), mqttTimerTimeout);
+    }
+
     logger.info(`Start MQTT monitoring`);
 
     mqttClient = await mqtt.connectAsync('tcp://192.168.6.5:1883');
