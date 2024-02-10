@@ -223,7 +223,7 @@ const reportMqttTimerExceeded = async function(mqttTimerName) {
 
     logger.info(`Start MQTT monitoring`);
 
-    mqttClient = await mqtt.connectAsync('tcp://192.168.6.5:1883');
+    mqttClient = await mqtt.connectAsync('tcp://192.168.6.5:1883', {clientId: hostname});
 
     mqttClient.on('message', async(topic, messageBuffer) => {
       const messageRaw = messageBuffer.toString();
