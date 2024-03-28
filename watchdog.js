@@ -3,17 +3,18 @@
 /* eslint-disable no-cond-assign */
 /* eslint-disable prefer-named-capture-group */
 
-import {setTimeout as delay} from 'timers/promises';
-import os                    from 'os';
+import {setTimeout as delay} from 'node:timers/promises';
+import os                    from 'node:os';
 
 import _                     from 'lodash';
 import axios                 from 'axios';
 import express               from 'express';
 import mqtt                  from 'async-mqtt';
 import ms                    from 'ms';
-
-import logger                from './logger.js';
-import {sendMail}            from './mail.js';
+import {
+  logger,
+  sendMail,
+} from '@stheine/helpers';
 
 const hostname = os.hostname();
 const mqttMonitoringHost = 'wyse-watchdog';
@@ -23,15 +24,16 @@ const servers  = [
   'qnap',
   'wyse',
 ];
-const ignoreDevices = [
-  'druckerkamera',
+const ignoreDevices = new Set([
+  'infrarotheizung-buero',
   'infrarotheizung-schlafzimmer',
+  'octoprint-camera',
   'steckdose',
-];
-const longTimeoutDevices = [
+]);
+const longTimeoutDevices = new Set([
   'infrarotheizung-buero',
   'thermometer',
-];
+]);
 const mqttTimerNames = [
   'esp32-wasser/zaehlerstand/json',
 ];
@@ -60,6 +62,7 @@ const stopProcess = async function() {
 
   logger.info(`Shutdown -------------------------------------------------`);
 
+  // eslint-disable-next-line no-process-exit
   process.exit(0);
 };
 
@@ -231,7 +234,7 @@ const reportMqttTimerExceeded = async function(mqttTimerName) {
 
       try {
         message = JSON.parse(messageRaw);
-      } catch {
+      } catch{
         // ignore
         message = {};
       }
@@ -356,13 +359,13 @@ const reportMqttTimerExceeded = async function(mqttTimerName) {
           }
 
           case topic === 'esp32-wasser/zaehlerstand/json': {
-            if(message.error === 'no error') {
+            if(message.value && message.error === 'no error') {
               if(timeout[topic]) {
-                logger.info(`${topic} timer clear`, messageRaw);
                 clearTimeout(timeout[topic]);
                 Reflect.deleteProperty(timeout, topic);
               }
               if(notified[topic]) {
+                logger.info(`${topic} timer clear`, messageRaw);
                 await sendMail({
                   to:      'technik@heine7.de',
                   subject: `MQTT recovered error from ${topic}`,
@@ -375,9 +378,9 @@ const reportMqttTimerExceeded = async function(mqttTimerName) {
                 notified[topic] = false;
               }
             } else if(!notified[topic] && !timeout[topic]) {
-              logger.info(`${topic} timer start`, messageRaw);
               timeout[topic] = setTimeout(async() => {
                 try {
+                  logger.info(`${topic} timer start`, messageRaw);
                   await sendMail({
                     to:      'technik@heine7.de',
                     subject: `MQTT error received from ${topic}`,
@@ -473,10 +476,11 @@ const reportMqttTimerExceeded = async function(mqttTimerName) {
               throw new Error('Sender not detected');
             }
 
-            if(ignoreDevices.includes(sender)) {
+            if(ignoreDevices.has(sender)) {
               // Ignore alive-stats for these devices
               return;
-            } else if(longTimeoutDevices.includes(sender)) {
+            }
+            if(longTimeoutDevices.has(sender)) {
               lwtTimeout = ms('6 hours');
             }
 
