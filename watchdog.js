@@ -9,7 +9,7 @@ import os                    from 'node:os';
 import _                     from 'lodash';
 import axios                 from 'axios';
 import express               from 'express';
-import mqtt                  from 'async-mqtt';
+import mqtt                  from 'mqtt';
 import ms                    from 'ms';
 import {
   logger,
@@ -31,8 +31,7 @@ const ignoreDevices = new Set([
   'steckdose',
 ]);
 const longTimeoutDevices = new Set([
-  'infrarotheizung-buero',
-  'thermometer',
+//  'infrarotheizung-buero',
 ]);
 const mqttTimerNames = [
   'esp32-wasser/zaehlerstand/json',
@@ -56,7 +55,7 @@ const timeout  = {};
 
 const stopProcess = async function() {
   if(mqttClient) {
-    await mqttClient.end();
+    await mqttClient.endAsync();
     mqttClient = undefined;
   }
 
@@ -279,19 +278,22 @@ const reportMqttTimerExceeded = async function(mqttTimerName) {
                   break;
 
                 default:
+                  /* eslint-disable indent */
                   await sendMail({
                     to:      'technik@heine7.de',
-                    subject: `MQTT device ??? '${message.data.friendly_name}'`,
+                    subject: `MQTT device ${message.data.status} '${message.data.friendly_name}'`,
                     html:    `
-                      <p>MQTT device ???</p>
-                      ${message.data.friendly_name}
-                      <br />
+                      <p>MQTT device ${message.data.status}p>
+                      ${message.data.friendly_name !== message.data.ieee_address ?
+                        `${message.data.friendly_name}<br />` :
+                        ''}
                       ${message.data.ieee_address}
                       <pre>
                         ${JSON.stringify(message, null, 2)}
                       </pre>
                     `,
                   });
+                  /* eslint-enable indent */
                   break;
               }
 
@@ -318,7 +320,9 @@ const reportMqttTimerExceeded = async function(mqttTimerName) {
               clearTimeout(timeout[sender]);
             }
 
-            if(!['Coordinator', 'FensterSensor Sonoff 1'].includes(sender)) {
+            if(!['Coordinator', 'FensterSensor Sonoff 1'].includes(sender) &&
+              !sender.startsWith('0x')
+            ) {
               timeout[sender] = setTimeout(async() => {
                 logger.info(`${sender} timer trigger notification`);
 
@@ -489,12 +493,6 @@ const reportMqttTimerExceeded = async function(mqttTimerName) {
                 if(timeout[sender]) {
                   // logger.warn(`${sender} timer already running: ${messageRaw}`);
                 } else {
-                  if(sender !== 'thermometer') {
-                    timeout[`${sender}-log`] = setTimeout(async() => {
-                      // Delay the logging, as there is often an Offline/Online within a few seconds.
-                      logger.info(`${sender} timer start: ${messageRaw}`);
-                    }, ms('10 seconds')); // Tasmota restart typically is 4 seconds
-                  }
                   timeout[sender] = setTimeout(async() => {
                     logger.info(`${sender} timer trigger notification: ${messageRaw}`);
 
@@ -521,7 +519,7 @@ const reportMqttTimerExceeded = async function(mqttTimerName) {
                   if(timeout[`${sender}-log`]) {
                     clearTimeout(timeout[`${sender}-log`]);
                     Reflect.deleteProperty(timeout, `${sender}-log`);
-                  } else if(sender !== 'thermometer') {
+                  } else {
                     logger.info(`${sender} clear timer: ${messageRaw}`);
                   }
                   clearTimeout(timeout[sender]);
@@ -562,10 +560,10 @@ const reportMqttTimerExceeded = async function(mqttTimerName) {
       }
     });
 
-    await mqttClient.subscribe('esp32-wasser/zaehlerstand/json');
-    await mqttClient.subscribe('tasmota/+/tele/LWT');
-    await mqttClient.subscribe('tasmota/espstrom/tele/SENSOR');
-    await mqttClient.subscribe('vito/tele/LWT');
-    await mqttClient.subscribe('Zigbee/#');
+    await mqttClient.subscribeAsync('esp32-wasser/zaehlerstand/json');
+    await mqttClient.subscribeAsync('tasmota/+/tele/LWT');
+    await mqttClient.subscribeAsync('tasmota/espstrom/tele/SENSOR');
+    await mqttClient.subscribeAsync('vito/tele/LWT');
+    await mqttClient.subscribeAsync('Zigbee/#');
   }
 })();

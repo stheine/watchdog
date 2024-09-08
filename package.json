@@ -11,10 +11,10 @@
   "license": "ISC",
   "dependencies": {
     "@stheine/helpers": "1.0.3",
-    "async-mqtt": "2.6.3",
     "axios": "1.6.8",
     "express": "4.19.2",
     "lodash": "4.17.21",
+    "mqtt": "5.10.1",
     "ms": "2.1.3"
   }
 }
