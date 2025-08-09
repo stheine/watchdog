@@ -25,6 +25,7 @@ const servers  = [
   'wyse',
 ];
 const ignoreDevices = new Set([
+  'espco2',
   'infrarotheizung-buero',
   'infrarotheizung-schlafzimmer',
   'octoprint-camera',
