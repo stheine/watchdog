@@ -19,9 +19,6 @@ import {
 const hostname = os.hostname();
 const mqttMonitoringHost = 'wyse-watchdog';
 const servers  = [
-  'pi-jalousie',
-  'pi-wecker',
-  'qnap',
   'wyse',
 ];
 const ignoreDevices = new Set([
