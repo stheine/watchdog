@@ -17,9 +17,9 @@ import {
 } from '@stheine/helpers';
 
 const hostname = os.hostname();
-const mqttMonitoringHost = 'wyse-watchdog';
+const mqttMonitoringHost = 'rocky-watchdog';
 const servers  = [
-  'wyse',
+  'rocky',
 ];
 const ignoreDevices = new Set([
   'espco2',
