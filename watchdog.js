@@ -297,16 +297,43 @@ if(hostname === mqttMonitoringHost) {
           if(topic.startsWith('Zigbee/bridge')) {
             return;
           }
-          if(topic.endsWith('/availability')) {
+
+          const sender = topic.replace(/^Zigbee\//, '').replace(/\/.*$/, '');
+          const {battery, state} = message;
+
+          if(!['Coordinator', 'FensterSensor Sonoff 1'].includes(sender) &&
+            !sender.startsWith('0x') &&
+            topic.endsWith('/availability') &&
+            state === 'offline'
+          ) {
+            logger.warn(`${sender} state=${state}`);
+
+            if(!notified[sender]) {
+              await notify(`[🔴 Offline] Watchdog Zigbee device offline ${sender} (${hostname})`, `
+                <p>Watchdog on ${hostname} detected Zigbee device offline:</p>
+                <p><pre>${sender} state=${state}</pre></p>
+              `);
+
+              notified[sender] = true;
+            }
+
             return;
           }
-
-          const sender = topic.replace(/^Zigbee\//, '');
-          const {battery} = message;
 
           // LuftSensor Büro battery=14, then dead
           if(battery < 16) {
             logger.warn(`${sender} battery=${battery}`);
+
+            if(!notified[sender]) {
+              await notify(`[🔴 Battery low] Watchdog Zigbee device battery low ${sender} (${hostname})`, `
+                <p>Watchdog on ${hostname} detected Zigbee device battery low:</p>
+                <p><pre>${sender} battery=${battery}</pre></p>
+              `);
+
+              notified[sender] = true;
+            }
+
+            return;
           }
 
           // logger.info(topic, messageRaw);
@@ -331,12 +358,12 @@ if(hostname === mqttMonitoringHost) {
           }
 
           if(notified[sender]) {
-            Reflect.deleteProperty(notified, sender);
-
             await notify(`[✅ Up] Watchdog Zigbee device back up ${sender} (${hostname})`, `
               <p>Watchdog on ${hostname} detected Zigbee device back up:</p>
               <p><pre>${sender}</pre></p>
             `);
+
+            Reflect.deleteProperty(notified, sender);
           }
           break;
         }
@@ -461,12 +488,7 @@ if(hostname === mqttMonitoringHost) {
 
             case 'Online':
               if(timeout[sender]) {
-                if(timeout[`${sender}-log`]) {
-                  clearTimeout(timeout[`${sender}-log`]);
-                  Reflect.deleteProperty(timeout, `${sender}-log`);
-                } else {
-                  logger.info(`${sender} clear timer: ${messageRaw}`);
-                }
+                logger.info(`${sender} clear timer: ${messageRaw}`);
                 clearTimeout(timeout[sender]);
                 Reflect.deleteProperty(timeout, sender);
               }
